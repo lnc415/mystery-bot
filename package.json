@@ -1,0 +1,26 @@
+{
+  "name": "mystery-bot",
+  "version": "1.0.0",
+  "description": "Modular Discord bot for Cardano & Midnight Network — chatbot, buy/sell alerts, GIFs. Paywall-gated modules.",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "register": "node src/register-commands.js",
+    "keygen": "node src/license/keygen.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.15.3",
+    "groq-sdk": "^0.3.3",
+    "openai": "^4.47.1",
+    "@anthropic-ai/sdk": "^0.24.3",
+    "axios": "^1.7.2",
+    "dotenv": "^16.4.5",
+    "uuid": "^10.0.0",
+    "node-cron": "^3.0.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

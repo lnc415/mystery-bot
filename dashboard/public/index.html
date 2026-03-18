@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mystery Bot — Owner Dashboard</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --noir-dark: #040410;
+      --noir-navy: #0a0a2e;
+      --noir-blue: #0d1b4b;
+      --gold: #c9a84c;
+      --gold-bright: #f0c040;
+      --teal: #00d4ff;
+      --red: #dc2626;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: linear-gradient(135deg, var(--noir-dark) 0%, var(--noir-navy) 100%);
+      color: #fff;
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    header {
+      padding: 30px 0 20px;
+      border-bottom: 1px solid var(--gold)/20;
+      margin-bottom: 30px;
+    }
+
+    h1 { font-size: 28px; color: var(--gold-bright); margin-bottom: 5px; }
+    h2 { font-size: 20px; color: var(--gold); margin: 30px 0 15px; }
+    h3 { font-size: 16px; color: var(--teal); margin: 20px 0 10px; }
+
+    /* ── Login Screen ────────────────────────────────────────── */
+    .login-screen {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: var(--noir-dark);
+      z-index: 999;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .login-screen.visible { display: flex; }
+
+    .login-box {
+      background: var(--noir-navy);
+      border: 2px solid var(--gold);
+      padding: 40px;
+      border-radius: 8px;
+      width: 100%;
+      max-width: 400px;
+    }
+
+    .login-box h1 { margin-bottom: 30px; text-align: center; }
+
+    input {
+      width: 100%;
+      padding: 12px;
+      margin-bottom: 15px;
+      background: var(--noir-blue);
+      border: 1px solid var(--gold)/30;
+      color: #fff;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+
+    input:focus { outline: none; border-color: var(--teal); }
+
+    button {
+      width: 100%;
+      padding: 12px;
+      background: linear-gradient(135deg, var(--gold), var(--gold-bright));
+      color: var(--noir-dark);
+      border: none;
+      border-radius: 4px;
+      font-weight: bold;
+      cursor: pointer;
+      font-size: 14px;
+      transition: opacity 0.2s;
+    }
+
+    button:hover { opacity: 0.9; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* ── Layout ──────────────────────────────────────────────── */
+    .tabs {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+      border-bottom: 1px solid var(--gold)/20;
+    }
+
+    .tab-btn {
+      padding: 12px 20px;
+      background: transparent;
+      color: var(--gold)/60;
+      border: none;
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+
+    .tab-btn.active {
+      color: var(--gold-bright);
+      border-bottom-color: var(--gold-bright);
+    }
+
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* ── Cards ───────────────────────────────────────────────── */
+    .card {
+      background: var(--noir-navy);
+      border: 1px solid var(--gold)/20;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 15px;
+      transition: all 0.2s;
+    }
+
+    .card:hover {
+      border-color: var(--teal)/40;
+      background: linear-gradient(135deg, var(--noir-navy), var(--noir-blue));
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 15px;
+    }
+
+    .card-title {
+      font-size: 18px;
+      color: var(--gold);
+      font-weight: 600;
+    }
+
+    .card-price {
+      font-size: 24px;
+      color: var(--teal);
+      font-weight: bold;
+    }
+
+    .card-price span {
+      font-size: 14px;
+      color: var(--gold)/60;
+    }
+
+    /* ── Pricing Grid ────────────────────────────────────────── */
+    .pricing-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+
+    .pricing-card {
+      background: linear-gradient(135deg, var(--noir-navy), var(--noir-blue));
+      border: 2px solid var(--gold);
+      border-radius: 8px;
+      padding: 25px;
+    }
+
+    .pricing-card .tier-name {
+      font-size: 20px;
+      color: var(--gold-bright);
+      margin-bottom: 10px;
+      font-weight: bold;
+    }
+
+    .pricing-card .tier-price {
+      font-size: 32px;
+      color: var(--teal);
+      font-weight: bold;
+      margin-bottom: 15px;
+    }
+
+    .pricing-card .tier-modules {
+      background: var(--noir-dark);
+      padding: 12px;
+      border-radius: 4px;
+      margin-bottom: 15px;
+      font-size: 13px;
+      color: var(--gold)/80;
+    }
+
+    .pricing-card .tier-modules strong {
+      color: var(--teal);
+    }
+
+    .edit-btn {
+      background: var(--teal);
+      color: var(--noir-dark);
+      padding: 8px 16px;
+      font-size: 12px;
+      width: auto;
+      margin-top: 10px;
+    }
+
+    /* ── License Table ───────────────────────────────────────── */
+    .licenses-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+
+    .licenses-table th {
+      background: var(--noir-blue);
+      border-bottom: 2px solid var(--gold)/20;
+      padding: 12px;
+      text-align: left;
+      font-size: 13px;
+      color: var(--teal);
+    }
+
+    .licenses-table td {
+      padding: 12px;
+      border-bottom: 1px solid var(--gold)/10;
+      font-size: 13px;
+    }
+
+    .licenses-table tr:hover {
+      background: var(--noir-blue);
+    }
+
+    .license-key {
+      font-family: monospace;
+      color: var(--gold);
+      background: var(--noir-dark);
+      padding: 4px 8px;
+      border-radius: 3px;
+    }
+
+    .delete-btn {
+      background: var(--red);
+      color: white;
+      padding: 6px 12px;
+      font-size: 11px;
+      width: auto;
+      margin: 0;
+    }
+
+    .copy-btn {
+      background: var(--teal);
+      color: var(--noir-dark);
+      padding: 6px 12px;
+      font-size: 11px;
+      width: auto;
+      margin: 0;
+    }
+
+    /* ── Form Grid ───────────────────────────────────────────── */
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .form-group label {
+      font-size: 13px;
+      color: var(--gold);
+      margin-bottom: 6px;
+      font-weight: 500;
+    }
+
+    .form-group input,
+    .form-group textarea {
+      padding: 10px;
+      background: var(--noir-blue);
+      border: 1px solid var(--gold)/20;
+      color: #fff;
+      border-radius: 4px;
+      font-size: 13px;
+      font-family: inherit;
+    }
+
+    .form-group textarea {
+      resize: vertical;
+      min-height: 80px;
+    }
+
+    /* ── Alerts ──────────────────────────────────────────────── */
+    .alert {
+      padding: 15px;
+      border-radius: 4px;
+      margin-bottom: 15px;
+      font-size: 13px;
+    }
+
+    .alert.success { background: #0d4b0d; color: #7eff7e; border-left: 3px solid #7eff7e; }
+    .alert.error { background: #4b0d0d; color: #ff7e7e; border-left: 3px solid #ff7e7e; }
+    .alert.info { background: #0d2b4b; color: #7ebfff; border-left: 3px solid #7ebfff; }
+
+    .modules-select {
+      display: flex;
+      gap: 10px;
+      margin-top: 8px;
+    }
+
+    .checkbox {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--gold)/80;
+      font-size: 13px;
+    }
+
+    .checkbox input {
+      width: auto;
+      margin: 0;
+    }
+
+    .logout-btn {
+      background: var(--red);
+      color: white;
+      padding: 8px 16px;
+      font-size: 12px;
+      width: auto;
+      position: absolute;
+      top: 20px;
+      right: 20px;
+    }
+
+    .status {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 3px;
+      font-size: 11px;
+      font-weight: bold;
+    }
+
+    .status.active { background: #0d4b0d; color: #7eff7e; }
+    .status.expiring { background: #4b3d0d; color: #ffff7e; }
+    .status.expired { background: #4b0d0d; color: #ff7e7e; }
+  </style>
+</head>
+<body>
+  <!-- Login -->
+  <div class="login-screen visible">
+    <div class="login-box">
+      <h1>🔐 Owner Login</h1>
+      <input type="password" id="password" placeholder="Owner password" onkeypress="if(event.key==='Enter') login()">
+      <button onclick="login()">Login</button>
+      <div style="margin-top:20px; font-size:12px; color:#fff/60; text-align:center;">
+        Default: <code>change-me</code>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dashboard -->
+  <div id="dashboard" style="display:none;">
+    <button class="logout-btn" onclick="logout()">Logout</button>
+    <div class="container">
+      <header>
+        <h1>🕵️ Mystery Bot Dashboard</h1>
+        <p style="color: var(--gold)/60; font-size: 14px;">Owner Interface — Pricing, Licensing, Configuration</p>
+      </header>
+
+      <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab('pricing')">💰 Pricing</button>
+        <button class="tab-btn" onclick="switchTab('licenses')">🔑 Licenses</button>
+        <button class="tab-btn" onclick="switchTab('settings')">⚙️ Settings</button>
+      </div>
+
+      <!-- PRICING TAB -->
+      <div id="pricing" class="tab-content active">
+        <h2>Pricing Tiers</h2>
+        <div class="pricing-grid" id="pricingGrid"></div>
+
+        <h3>Add / Edit Tier</h3>
+        <div class="card">
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Tier ID (starter, trader, pro)</label>
+              <input type="text" id="tierId" placeholder="e.g., starter">
+            </div>
+            <div class="form-group">
+              <label>Display Name</label>
+              <input type="text" id="tierName" placeholder="e.g., Starter">
+            </div>
+            <div class="form-group">
+              <label>Price (USD)</label>
+              <input type="number" id="tierPrice" placeholder="29" min="0">
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Description</label>
+            <textarea id="tierDesc" placeholder="What's included in this tier?"></textarea>
+          </div>
+          <div class="form-group">
+            <label>Modules</label>
+            <div class="modules-select">
+              <label class="checkbox"><input type="checkbox" value="gifbot" class="tier-module"> GIF Bot</label>
+              <label class="checkbox"><input type="checkbox" value="chatbot" class="tier-module"> Chatbot</label>
+              <label class="checkbox"><input type="checkbox" value="buybot" class="tier-module"> Buy Bot</label>
+              <label class="checkbox"><input type="checkbox" value="sellbot" class="tier-module"> Sell Bot</label>
+              <label class="checkbox"><input type="checkbox" value="liquidity" class="tier-module"> Liquidity</label>
+            </div>
+          </div>
+          <button onclick="savePricingTier()">Save Tier</button>
+        </div>
+      </div>
+
+      <!-- LICENSES TAB -->
+      <div id="licenses" class="tab-content">
+        <h2>License Keys</h2>
+
+        <h3>Generate License (Manual)</h3>
+        <div class="card">
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Tier</label>
+              <select id="genTier" style="padding:10px; background:var(--noir-blue); border:1px solid var(--gold)/20; color:#fff; border-radius:4px;">
+                <option>starter</option>
+                <option>trader</option>
+                <option selected>pro</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Label (customer email/name)</label>
+              <input type="text" id="genLabel" placeholder="customer@example.com">
+            </div>
+            <div class="form-group">
+              <label>Days Valid</label>
+              <input type="number" id="genDays" value="90" min="1">
+            </div>
+          </div>
+          <button onclick="generateLicense()">Generate Key</button>
+        </div>
+
+        <h3>Active Licenses</h3>
+        <table class="licenses-table">
+          <thead>
+            <tr>
+              <th>Key</th>
+              <th>Customer</th>
+              <th>Tier</th>
+              <th>Status</th>
+              <th>Expires</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="licensesTable"></tbody>
+        </table>
+      </div>
+
+      <!-- SETTINGS TAB -->
+      <div id="settings" class="tab-content">
+        <h2>Configuration</h2>
+
+        <h3>Security</h3>
+        <div class="card">
+          <div class="form-group">
+            <label>Change Owner Password</label>
+            <input type="password" id="newPassword" placeholder="New password">
+          </div>
+          <button onclick="updatePassword()">Update Password</button>
+        </div>
+
+        <h3>Stripe Integration</h3>
+        <div class="card">
+          <div class="alert info">
+            Set your Stripe Secret Key to enable automatic license generation on payment.
+          </div>
+          <div class="form-group">
+            <label>Stripe Secret Key (sk_...)</label>
+            <input type="password" id="stripeKey" placeholder="sk_live_..." />
+          </div>
+          <div class="form-group">
+            <label>Stripe Public Key (pk_...) — optional</label>
+            <input type="text" id="stripePubKey" placeholder="pk_live_..." />
+          </div>
+          <div class="form-group">
+            <label>Webhook Secret (whsec_...) — optional</label>
+            <input type="password" id="webhookSecret" placeholder="whsec_..." />
+          </div>
+          <button onclick="updateStripe()">Save Stripe Config</button>
+        </div>
+
+        <h3>Quick Start</h3>
+        <div class="card">
+          <div style="color: var(--gold)/60); font-size:13px; line-height:1.8;">
+            <p>1. Set your Discord bot token in the main <code>.env</code></p>
+            <p>2. Generate license keys here or let Stripe auto-generate them</p>
+            <p>3. Customers can use their license key by setting <code>LICENSE_KEY=MBOT-...</code> in their bot <code>.env</code></p>
+            <p>4. Deployed bots will automatically unlock features based on their license</p>
+          </div>
+        </div>
+      </div>
+
+      <div id="alert"></div>
+    </div>
+  </div>
+
+  <script>
+    let token = null;
+
+    async function login() {
+      const password = document.getElementById("password").value;
+      try {
+        const res = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password }),
+        });
+        if (!res.ok) throw new Error("Invalid password");
+        const data = await res.json();
+        token = data.token;
+        document.querySelector(".login-screen").classList.remove("visible");
+        document.getElementById("dashboard").style.display = "block";
+        loadPricing();
+        loadLicenses();
+      } catch (err) {
+        showAlert(err.message, "error");
+      }
+    }
+
+    function logout() {
+      token = null;
+      document.querySelector(".login-screen").classList.add("visible");
+      document.getElementById("dashboard").style.display = "none";
+    }
+
+    function switchTab(tab) {
+      document.querySelectorAll(".tab-content").forEach(el => el.classList.remove("active"));
+      document.querySelectorAll(".tab-btn").forEach(el => el.classList.remove("active"));
+      document.getElementById(tab).classList.add("active");
+      event.target.classList.add("active");
+    }
+
+    async function loadPricing() {
+      try {
+        const res = await fetch("/api/pricing");
+        const data = await res.json();
+        const grid = document.getElementById("pricingGrid");
+        grid.innerHTML = Object.entries(data).map(([id, tier]) => `
+          <div class="pricing-card">
+            <div class="tier-name">${tier.name}</div>
+            <div class="tier-price">$${tier.price}</div>
+            <div class="tier-modules">
+              <strong>Modules:</strong><br>${tier.modules.join(", ")}
+            </div>
+            <button class="edit-btn" onclick="editTier('${id}', ${JSON.stringify(tier).replace(/"/g, '&quot;')})">Edit</button>
+          </div>
+        `).join("");
+      } catch (err) {
+        showAlert(err.message, "error");
+      }
+    }
+
+    async function savePricingTier() {
+      const tier = document.getElementById("tierId").value.trim();
+      const name = document.getElementById("tierName").value.trim();
+      const price = parseFloat(document.getElementById("tierPrice").value);
+      const desc = document.getElementById("tierDesc").value.trim();
+      const modules = Array.from(document.querySelectorAll(".tier-module:checked")).map(el => el.value);
+
+      if (!tier || !name || isNaN(price) || modules.length === 0) {
+        return showAlert("Fill all fields", "error");
+      }
+
+      try {
+        const res = await fetch(`/api/pricing/${tier}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`,
+          },
+          body: JSON.stringify({ name, price, modules, description: desc }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+        showAlert(`Tier "${name}" saved!`, "success");
+        document.getElementById("tierId").value = "";
+        document.getElementById("tierName").value = "";
+        document.getElementById("tierPrice").value = "";
+        document.getElementById("tierDesc").value = "";
+        document.querySelectorAll(".tier-module").forEach(el => el.checked = false);
+        loadPricing();
+      } catch (err) {
+        showAlert(err.message, "error");
+      }
+    }
+
+    async function loadLicenses() {
+      try {
+        const res = await fetch("/api/licenses", {
+          headers: { "Authorization": `Bearer ${token}` },
+        });
+        const data = await res.json();
+        const tbody = document.getElementById("licensesTable");
+        tbody.innerHTML = data.map(lic => {
+          const daysLeft = lic.daysRemaining;
+          let status = "active";
+          if (daysLeft === null) status = "lifetime";
+          else if (daysLeft < 0) status = "expired";
+          else if (daysLeft < 30) status = "expiring";
+          return `
+            <tr>
+              <td><span class="license-key">${lic.key.slice(0, 12)}…</span></td>
+              <td>${lic.label}</td>
+              <td>${lic.tier}</td>
+              <td><span class="status ${status}">${status.toUpperCase()}</span></td>
+              <td>${daysLeft === null ? "—" : daysLeft + " days"}</td>
+              <td>
+                <button class="copy-btn" onclick="copy('${lic.key}')">Copy</button>
+                <button class="delete-btn" onclick="deleteLicense('${lic.key}')">Delete</button>
+              </td>
+            </tr>
+          `;
+        }).join("");
+      } catch (err) {
+        showAlert(err.message, "error");
+      }
+    }
+
+    async function generateLicense() {
+      const tier = document.getElementById("genTier").value;
+      const label = document.getElementById("genLabel").value.trim() || "Manual";
+      const days = parseInt(document.getElementById("genDays").value);
+
+      try {
+        const res = await fetch("/api/licenses/generate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`,
+          },
+          body: JSON.stringify({ tier, label, days }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        showAlert(`Generated: ${data.key}`, "success");
+        document.getElementById("genLabel").value = "";
+        loadLicenses();
+      } catch (err) {
+        showAlert(err.message, "error");
+      }
+    }
+
+    async function deleteLicense(key) {
+      if (!confirm(`Delete ${key}?`)) return;
+      try {
+        const res = await fetch(`/api/licenses/${key}`, {
+          method: "DELETE",
+          headers: { "Authorization": `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error("Failed");
+        showAlert("Deleted", "success");
+        loadLicenses();
+      } catch (err) {
+        showAlert(err.message, "error");
+      }
+    }
+
+    function copy(text) {
+      navigator.clipboard.writeText(text);
+      showAlert("Copied!", "success");
+    }
+
+    async function updatePassword() {
+      const newPassword = document.getElementById("newPassword").value;
+      if (!newPassword) return showAlert("Enter new password", "error");
+      try {
+        const res = await fetch("/api/settings", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`,
+          },
+          body: JSON.stringify({ newPassword }),
+        });
+        if (!res.ok) throw new Error("Failed");
+        showAlert("Password updated", "success");
+        document.getElementById("newPassword").value = "";
+      } catch (err) {
+        showAlert(err.message, "error");
+      }
+    }
+
+    async function updateStripe() {
+      const stripeKey = document.getElementById("stripeKey").value;
+      if (!stripeKey) return showAlert("Enter Stripe key", "error");
+      try {
+        const res = await fetch("/api/settings", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`,
+          },
+          body: JSON.stringify({ stripeKey }),
+        });
+        if (!res.ok) throw new Error("Failed");
+        showAlert("Stripe config saved. Webhooks will auto-generate licenses.", "success");
+      } catch (err) {
+        showAlert(err.message, "error");
+      }
+    }
+
+    function showAlert(message, type = "info") {
+      const el = document.getElementById("alert");
+      el.className = `alert ${type}`;
+      el.textContent = message;
+      setTimeout(() => (el.textContent = ""), 5000);
+    }
+
+    function editTier(id, tier) {
+      document.getElementById("tierId").value = id;
+      document.getElementById("tierName").value = tier.name;
+      document.getElementById("tierPrice").value = tier.price;
+      document.getElementById("tierDesc").value = tier.description;
+      document.querySelectorAll(".tier-module").forEach(el => {
+        el.checked = tier.modules.includes(el.value);
+      });
+      document.querySelector("[onclick=\"switchTab('pricing')\"]").click();
+      window.scrollTo(0, 0);
+    }
+  </script>
+</body>
+</html>

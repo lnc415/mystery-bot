@@ -1,0 +1,38 @@
+{
+  "gifbot": {
+    "name": "GIF Bot",
+    "price": 10,
+    "modules": ["gifbot"],
+    "description": "Random GIF responder — /gif command"
+  },
+  "chatbot": {
+    "name": "Chatbot",
+    "price": 50,
+    "modules": ["chatbot"],
+    "description": "AI chatbot powered by Groq — @mention to chat"
+  },
+  "buybot": {
+    "name": "Buy Bot",
+    "price": 25,
+    "modules": ["buybot"],
+    "description": "Cardano DEX buy alerts — real-time monitoring"
+  },
+  "sellbot": {
+    "name": "Sell Bot",
+    "price": 25,
+    "modules": ["sellbot"],
+    "description": "Cardano DEX sell alerts"
+  },
+  "liquidity": {
+    "name": "Liquidity Monitor",
+    "price": 25,
+    "modules": ["liquidity"],
+    "description": "Liquidity add/remove events"
+  },
+  "bundle": {
+    "name": "Full Package",
+    "price": 75,
+    "modules": ["gifbot", "chatbot", "buybot", "sellbot", "liquidity"],
+    "description": "All 5 modules — save $35!"
+  }
+}
