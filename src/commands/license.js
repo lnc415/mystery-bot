@@ -15,8 +15,8 @@ const {
   PermissionFlagsBits,
 } = require("discord.js");
 
-const { activateLicense, getEntitlements } = require("../license/manager");
-const { setGuildConfig }                   = require("../lib/guildConfig");
+const { activateLicense, FREE_MODULES }    = require("../license/manager");
+const { setGuildConfig, getGuildConfig }   = require("../lib/guildConfig");
 
 const MODULE_LABELS = {
   gifbot:    "🎬 GIF Bot (free)",
@@ -65,11 +65,15 @@ async function execute(interaction) {
     });
   }
 
-  // Mirror the module list into guilds.json so guildConfig.hasModule() works
-  // without having to cross-reference license/keys.json on every command.
+  // Merge new modules with any already-licensed modules for this guild
+  // so activating a second key never wipes out a previous one.
+  const existing        = getGuildConfig(guildId);
+  const existingModules = existing.modules || [];
+  const merged          = [...new Set([...FREE_MODULES, ...existingModules, ...result.modules])];
+
   setGuildConfig(guildId, {
     licenseKey: key,
-    modules:    result.modules,
+    modules:    merged,
     expiresAt:  result.expires || null,
   });
 
