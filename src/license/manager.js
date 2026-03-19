@@ -208,6 +208,7 @@ async function isUnlockedAsync(module, licenseKey, guildId = null) {
  * Get key info (for /status command).
  */
 function keyInfo(licenseKey, guildId = null) {
+  loadKeys();
   if (!licenseKey) return { valid: false, reason: "No key provided" };
 
   const entry = keyStore[licenseKey.trim()];
@@ -236,6 +237,7 @@ function keyInfo(licenseKey, guildId = null) {
  * Returns { success, reason, modules, expires }
  */
 function activateLicense(licenseKey, guildId) {
+  loadKeys(); // Always read fresh from disk so newly-generated keys are found
   const key = licenseKey.trim().toUpperCase();
   const entry = keyStore[key];
 
