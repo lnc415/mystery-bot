@@ -26,10 +26,14 @@ const client = axios.create({
  * @returns {Promise<Array<{ action, adaAmount, tokenAmount, txHash, time, dex }>>}
  */
 async function getRecentTrades(policyId) {
-  // Fetch recent transactions for this policy
+  // Use POST /asset_txs with correct Koios v1 format
+  // Returns last 20 txs for this policy, then classifies each as buy/sell
   const res = await client.post("/asset_txs", {
-    _asset_list: [[policyId, ""]],
+    _asset_list:        [[policyId, ""]],
     _after_block_height: 0,
+    _count:             20,
+  }, {
+    headers: { "Content-Type": "application/json" },
   });
 
   const txs = Array.isArray(res.data) ? res.data.slice(0, 20) : [];
@@ -43,36 +47,36 @@ async function getRecentTrades(policyId) {
     if (!txHash) continue;
 
     try {
-      const utxoRes = await client.get(`/tx_utxos?_tx_hashes=["${txHash}"]`);
+      // Koios v1 tx_utxos uses POST with array of hashes
+      const utxoRes = await client.post("/tx_utxos", {
+        _tx_hashes: [txHash],
+      });
       const utxoData = Array.isArray(utxoRes.data) ? utxoRes.data[0] : null;
       if (!utxoData) continue;
 
       const inputs  = utxoData.inputs  || [];
       const outputs = utxoData.outputs || [];
 
-      // Determine ADA flow to classify buy vs sell
-      // Buy:  ADA goes OUT of user wallet, token comes IN → net ADA negative
-      // Sell: Token goes OUT, ADA comes IN → net ADA positive
+      // Determine ADA flow: net positive ADA out = buy, net negative = sell
       let adaIn  = 0;
       let adaOut = 0;
 
       for (const inp of inputs) {
-        const lovelace = inp.value?.find(v => v.unit === "lovelace");
+        const lovelace = (inp.value || []).find(v => v.unit === "lovelace");
         if (lovelace) adaIn += Number(lovelace.quantity || 0);
       }
       for (const out of outputs) {
-        const lovelace = out.value?.find(v => v.unit === "lovelace");
+        const lovelace = (out.value || []).find(v => v.unit === "lovelace");
         if (lovelace) adaOut += Number(lovelace.quantity || 0);
       }
 
-      const netAda     = (adaOut - adaIn) / 1_000_000; // lovelace → ADA
-      const adaAmount  = Math.abs(netAda);
-      const action     = netAda > 0 ? "buy" : "sell"; // ADA out = user bought token
+      const netAda    = (adaOut - adaIn) / 1_000_000;
+      const adaAmount = Math.abs(netAda);
+      const action    = netAda > 0 ? "buy" : "sell";
 
-      // Find token amount from outputs
       let tokenAmount = 0;
       for (const out of outputs) {
-        const tok = out.value?.find(v => v.unit.startsWith(policyId));
+        const tok = (out.value || []).find(v => v.unit && v.unit.startsWith(policyId));
         if (tok) tokenAmount += Number(tok.quantity || 0);
       }
 

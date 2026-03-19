@@ -9,7 +9,7 @@
 
 const axios = require("axios");
 
-const BASE_URL = "https://api.dexhunter.io/api";
+const BASE_URL = "https://api.dexhunter.io";
 
 /**
  * Get recent swaps for a token policy ID.
@@ -29,7 +29,7 @@ async function getRecentSwaps(policyId, apiKey) {
   });
 
   const res = await client.get("/swap/history", {
-    params: { policy: policyId, limit: 20 },
+    params: { policy_id: policyId, limit: 20 },
   });
 
   const raw = Array.isArray(res.data) ? res.data : (res.data?.swaps || res.data?.data || []);
