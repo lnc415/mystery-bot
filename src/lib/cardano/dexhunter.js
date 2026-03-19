@@ -23,7 +23,7 @@ async function getRecentSwaps(policyId, apiKey) {
   const client = axios.create({
     baseURL: BASE_URL,
     headers: {
-      "X-Api-Key": apiKey,
+      "X-Partner-Id": apiKey,
     },
     timeout: 10_000,
   });
