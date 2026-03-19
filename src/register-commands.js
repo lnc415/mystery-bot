@@ -11,14 +11,26 @@ require("dotenv").config();
 const { REST, Routes } = require("discord.js");
 const config = require("./config");
 
-const commands = [
-  require("./commands/configure").command.toJSON(),
-  require("./commands/license").command.toJSON(),
-  require("./commands/setup").command.toJSON(),
-  require("./commands/status").command.toJSON(),
-  require("./commands/help").command.toJSON(),
-  require("./modules/gifbot/index").command.toJSON(),
+const commandFiles = [
+  { name: "configure", path: "./commands/configure"      },
+  { name: "license",   path: "./commands/license"        },
+  { name: "setup",     path: "./commands/setup"          },
+  { name: "status",    path: "./commands/status"         },
+  { name: "help",      path: "./commands/help"           },
+  { name: "gif",       path: "./modules/gifbot/index"    },
 ];
+
+const commands = [];
+for (const { name, path: filePath } of commandFiles) {
+  try {
+    const mod = require(filePath);
+    if (!mod.command) throw new Error("missing .command export");
+    commands.push(mod.command.toJSON());
+    console.log(`  ✅ Loaded: /${name}`);
+  } catch (err) {
+    console.error(`  ❌ Failed to load /${name}: ${err.message}`);
+  }
+}
 
 const rest = new REST().setToken(config.discord.token);
 
