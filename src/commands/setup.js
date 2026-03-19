@@ -40,18 +40,21 @@ function requiresLicense(interaction, module) {
 async function handleBuybot(interaction) {
   if (requiresLicense(interaction, "buybot")) return;
 
-  const policyId  = interaction.options.getString("policy");
-  const channel   = interaction.options.getChannel("channel");
-  const guildId   = interaction.guildId;
+  const policyId = interaction.options.getString("policy");
+  const ticker   = interaction.options.getString("ticker") || "$TOKEN";
+  const channel  = interaction.options.getChannel("channel");
+  const guildId  = interaction.guildId;
 
   setModuleConfig(guildId, "buybot", {
-    policyId:  policyId,
+    policyId,
+    ticker,
     channelId: channel.id,
   });
 
   return interaction.reply({
     content:
       `✅ **Buy Bot configured!**\n` +
+      `Token: **${ticker}**\n` +
       `Monitoring policy \`${policyId.slice(0, 16)}…\` → <#${channel.id}>\n\n` +
       `Buy alerts will post there whenever a transaction is detected.`,
     ephemeral: true,
@@ -232,6 +235,12 @@ const command = new SlashCommandBuilder()
           .setName("policy")
           .setDescription("Cardano token policy ID to monitor")
           .setRequired(true)
+      )
+      .addStringOption((opt) =>
+        opt
+          .setName("ticker")
+          .setDescription("Token ticker symbol shown in alerts (e.g. $NIGHT, $141)")
+          .setRequired(false)
       )
       .addChannelOption((opt) =>
         opt

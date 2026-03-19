@@ -110,4 +110,23 @@ function extractAdaAmount(utxos) {
   return Number(totalLovelace) / 1_000_000;
 }
 
-module.exports = { getAssetTransactions, getTransactionDetails, classifyTransaction, extractAdaAmount };
+/**
+ * Extract token amount moved for a given policy ID from UTXOs.
+ *
+ * @param {object} utxos     - { inputs, outputs }
+ * @param {string} policyId  - Cardano policy ID
+ * @returns {number} token amount (raw quantity)
+ */
+function extractTokenAmount(utxos, policyId) {
+  let tokenOut = 0n;
+  for (const output of utxos.outputs || []) {
+    for (const amt of output.amount || []) {
+      if (amt.unit.startsWith(policyId)) {
+        tokenOut += BigInt(amt.quantity || 0);
+      }
+    }
+  }
+  return Number(tokenOut);
+}
+
+module.exports = { getAssetTransactions, getTransactionDetails, classifyTransaction, extractAdaAmount, extractTokenAmount };

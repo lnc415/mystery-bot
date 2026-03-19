@@ -167,13 +167,14 @@ async function fetchNewTrades(guildId) {
         if (!tx.txHash) continue;
         try {
           const utxos  = await blockfrost.getTransactionDetails(tx.txHash, BLOCKFROST_API_KEY);
-          const action = blockfrost.classifyTransaction(utxos, policyId);
+          const action      = blockfrost.classifyTransaction(utxos, policyId);
           if (action === "other") continue;
-          const adaAmount = blockfrost.extractAdaAmount(utxos);
+          const adaAmount   = blockfrost.extractAdaAmount(utxos);
+          const tokenAmount = blockfrost.extractTokenAmount(utxos, policyId);
           trades.push({
             action,
             adaAmount,
-            tokenAmount: 0,
+            tokenAmount,
             txHash: tx.txHash,
             time:   tx.blockTime,
             dex:    "Cardano Chain",
