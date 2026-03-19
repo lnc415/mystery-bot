@@ -40,6 +40,9 @@ let keyStore = {};
 let cachedValidation = null;
 let cacheTime = 0;
 
+// In-memory guild → key map (rebuilt from keyStore on load)
+let guildIndex = {};
+
 function loadKeys() {
   if (fs.existsSync(KEYS_FILE)) {
     try {
@@ -48,6 +51,17 @@ function loadKeys() {
       keyStore = {};
     }
   }
+  // Rebuild guild index from stored keys
+  guildIndex = {};
+  for (const [k, v] of Object.entries(keyStore)) {
+    if (v && v.guildId) {
+      guildIndex[v.guildId] = k;
+    }
+  }
+}
+
+function saveKeys() {
+  fs.writeFileSync(KEYS_FILE, JSON.stringify(keyStore, null, 2));
 }
 
 loadKeys();
@@ -216,6 +230,80 @@ function keyInfo(licenseKey, guildId = null) {
   };
 }
 
+/**
+ * Activate a license key for a specific guild.
+ * Binds the key to that guild and saves to keys.json.
+ * Returns { success, reason, modules, expires }
+ */
+function activateLicense(licenseKey, guildId) {
+  const key = licenseKey.trim().toUpperCase();
+  const entry = keyStore[key];
+
+  if (!entry) {
+    return { success: false, reason: "Key not found. Double-check the key or purchase a license at the dashboard." };
+  }
+
+  if (isExpired(entry.expires)) {
+    return { success: false, reason: "This license key has expired. Please purchase a new license." };
+  }
+
+  // If key is already bound to a DIFFERENT guild, reject
+  if (entry.guildId && entry.guildId !== guildId) {
+    return { success: false, reason: "This key is already bound to a different server. Each server needs its own license." };
+  }
+
+  // Unbind old key for this guild if one exists
+  const previousKey = guildIndex[guildId];
+  if (previousKey && previousKey !== key && keyStore[previousKey]) {
+    delete keyStore[previousKey].guildId;
+  }
+
+  // Bind this key to the guild
+  entry.guildId = guildId;
+  entry.activatedAt = new Date().toISOString();
+  keyStore[key] = entry;
+  guildIndex[guildId] = key;
+
+  saveKeys();
+
+  console.log(`[License] Activated ${key} for guild ${guildId} — modules: ${entry.modules.join(", ")}`);
+
+  return {
+    success:  true,
+    modules:  entry.modules,
+    expires:  entry.expires,
+    tier:     entry.tier,
+    label:    entry.label,
+  };
+}
+
+/**
+ * Look up the active license record for a guild.
+ * Returns the full license entry (with key field added) or null.
+ */
+function getLicenseForGuild(guildId) {
+  const key = guildIndex[guildId];
+  if (!key) return null;
+
+  const entry = keyStore[key];
+  if (!entry) return null;
+  if (isExpired(entry.expires)) return null;
+
+  return { ...entry, key };
+}
+
+/**
+ * Returns an array of enabled module names for a guild.
+ * Always includes free modules. Returns [] if no license.
+ */
+function getModulesForGuild(guildId) {
+  const license = getLicenseForGuild(guildId);
+  if (!license) return [...FREE_MODULES];
+
+  const all = new Set([...FREE_MODULES, ...(license.modules || [])]);
+  return [...all];
+}
+
 module.exports = {
   getEntitlements,
   isUnlocked,
@@ -224,6 +312,9 @@ module.exports = {
   keyInfo,
   isExpired,
   verifySignature,
+  activateLicense,
+  getLicenseForGuild,
+  getModulesForGuild,
   TIERS,
   FREE_MODULES,
 };

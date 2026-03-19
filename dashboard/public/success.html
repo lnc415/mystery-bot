@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mystery Bot — License Ready!</title>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --dark:       #040410;
+      --navy:       #0a0a2e;
+      --blue:       #0d1b4b;
+      --gold:       #c9a84c;
+      --gold-bright:#f0c040;
+      --teal:       #00d4ff;
+      --green:      #00c851;
+      --red:        #dc2626;
+      --text:       #e8e8f0;
+      --muted:      #8888aa;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: linear-gradient(135deg, var(--dark) 0%, var(--navy) 100%);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .card {
+      background: var(--navy);
+      border: 2px solid var(--gold);
+      border-radius: 16px;
+      padding: 48px 40px;
+      max-width: 560px;
+      width: 100%;
+      margin: 20px;
+      text-align: center;
+    }
+
+    .icon {
+      font-size: 56px;
+      margin-bottom: 20px;
+      display: block;
+    }
+
+    h1 {
+      font-size: 28px;
+      color: var(--gold-bright);
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 15px;
+      margin-bottom: 36px;
+    }
+
+    /* Key display */
+    .key-box {
+      background: var(--dark);
+      border: 2px solid var(--gold);
+      border-radius: 10px;
+      padding: 20px;
+      margin-bottom: 12px;
+    }
+
+    .key-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: var(--teal);
+      margin-bottom: 8px;
+    }
+
+    .key-value {
+      font-family: "Courier New", Courier, monospace;
+      font-size: 22px;
+      color: var(--gold-bright);
+      font-weight: bold;
+      letter-spacing: 1px;
+      word-break: break-all;
+    }
+
+    .copy-btn {
+      display: inline-block;
+      margin-top: 12px;
+      padding: 10px 28px;
+      background: linear-gradient(135deg, var(--gold), var(--gold-bright));
+      color: var(--dark);
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+
+    .copy-btn:hover { opacity: 0.9; }
+
+    /* Modules chips */
+    .modules {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: center;
+      margin: 24px 0;
+    }
+
+    .chip {
+      background: rgba(0,212,255,0.1);
+      border: 1px solid var(--teal);
+      color: var(--teal);
+      padding: 5px 12px;
+      border-radius: 20px;
+      font-size: 13px;
+    }
+
+    /* Instruction box */
+    .instructions {
+      background: rgba(0,200,81,0.08);
+      border: 1px solid var(--green);
+      border-radius: 10px;
+      padding: 20px;
+      text-align: left;
+      margin-top: 28px;
+    }
+
+    .instructions h3 {
+      color: var(--green);
+      font-size: 14px;
+      margin-bottom: 12px;
+    }
+
+    .instructions ol {
+      list-style: none;
+      counter-reset: steps;
+    }
+
+    .instructions li {
+      counter-increment: steps;
+      font-size: 14px;
+      color: var(--muted);
+      padding: 6px 0;
+      padding-left: 28px;
+      position: relative;
+    }
+
+    .instructions li::before {
+      content: counter(steps);
+      position: absolute;
+      left: 0;
+      top: 8px;
+      width: 18px;
+      height: 18px;
+      background: var(--green);
+      color: var(--dark);
+      border-radius: 50%;
+      font-size: 11px;
+      font-weight: bold;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .instructions code {
+      color: var(--gold);
+      background: rgba(201,168,76,0.1);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    .email-note {
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 16px;
+    }
+
+    /* Loading / error states */
+    .loading { color: var(--muted); font-size: 15px; }
+    .error-state { color: #ff9999; font-size: 14px; margin-top: 12px; }
+
+    .back-link {
+      display: inline-block;
+      margin-top: 28px;
+      color: var(--teal);
+      font-size: 14px;
+      text-decoration: none;
+    }
+
+    .back-link:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="card" id="card">
+    <span class="icon">⏳</span>
+    <h1>Loading Your License…</h1>
+    <p class="loading">Please wait while we prepare your key.</p>
+  </div>
+
+  <script>
+    const MODULE_LABELS = {
+      gifbot:    "🎬 GIF Bot",
+      chatbot:   "🤖 Chatbot",
+      buybot:    "📈 Buy Bot",
+      sellbot:   "📉 Sell Alerts",
+      liquidity: "💧 Liquidity Monitor",
+    };
+
+    async function loadLicense() {
+      const params  = new URLSearchParams(window.location.search);
+      const session = params.get("session");
+
+      if (!session) {
+        return renderError("No session ID in URL. If you just paid, check your email for your key.");
+      }
+
+      // Poll up to 10s for the webhook to process
+      let data;
+      for (let i = 0; i < 10; i++) {
+        try {
+          const res = await fetch(`/api/pending-license?session=${encodeURIComponent(session)}`);
+          if (res.ok) {
+            data = await res.json();
+            break;
+          }
+        } catch {}
+        await new Promise(r => setTimeout(r, 1000));
+      }
+
+      if (!data || !data.key) {
+        return renderError(
+          "We couldn't retrieve your license automatically. " +
+          "Your key has been emailed to you. " +
+          "Contact support if you need help."
+        );
+      }
+
+      renderSuccess(data);
+    }
+
+    function renderSuccess(data) {
+      const moduleChips = (data.modules || [])
+        .map(m => `<span class="chip">${MODULE_LABELS[m] || m}</span>`)
+        .join("");
+
+      document.getElementById("card").innerHTML = `
+        <span class="icon">🎉</span>
+        <h1>Payment Successful!</h1>
+        <p class="subtitle">Your Mystery Bot license is ready. Copy it now — it's also been emailed to you.</p>
+
+        <div class="key-box">
+          <div class="key-label">Your License Key</div>
+          <div class="key-value" id="keyVal">${data.key}</div>
+        </div>
+        <button class="copy-btn" onclick="copyKey()">📋 Copy Key</button>
+
+        <div class="modules">
+          ${moduleChips || '<span class="chip">Loading modules…</span>'}
+        </div>
+
+        <div class="instructions">
+          <h3>Next Steps — Activate in Discord</h3>
+          <ol>
+            <li>Add Mystery Bot to your Discord server (if not already done)</li>
+            <li>Run <code>/license ${data.key}</code> in any channel</li>
+            <li>Only admins can run this command — your features unlock instantly for the whole server</li>
+          </ol>
+        </div>
+
+        <p class="email-note">A copy of this key has been sent to ${data.label || "your email"}.</p>
+
+        <a href="/buy" class="back-link">← Buy more modules</a>
+      `;
+    }
+
+    function renderError(msg) {
+      document.getElementById("card").innerHTML = `
+        <span class="icon">⚠️</span>
+        <h1>Something Went Wrong</h1>
+        <p class="error-state">${msg}</p>
+        <a href="/buy" class="back-link">← Back to purchase page</a>
+      `;
+    }
+
+    function copyKey() {
+      const key = document.getElementById("keyVal").textContent;
+      navigator.clipboard.writeText(key).then(() => {
+        const btn = document.querySelector(".copy-btn");
+        btn.textContent = "✓ Copied!";
+        setTimeout(() => (btn.textContent = "📋 Copy Key"), 2000);
+      });
+    }
+
+    loadLicense();
+  </script>
+</body>
+</html>

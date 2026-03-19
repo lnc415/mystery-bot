@@ -12,6 +12,9 @@ const fs      = require("fs");
 const { v4: uuidv4 } = require("uuid");
 const Stripe  = require("stripe");
 
+// Bot's keys.json — where license keys live for the Discord bot
+const BOT_KEYS_FILE = path.join(__dirname, "../src/license/keys.json");
+
 require("dotenv").config();
 
 const app = express();
@@ -49,6 +52,27 @@ let pricing  = ensureFile(PRICING_FILE, {
 
 function save(file, data) {
   fs.writeFileSync(file, JSON.stringify(data, null, 2));
+}
+
+// ── Key generation helper ───────────────────────────────────────
+
+function generateKey() {
+  const raw = uuidv4().replace(/-/g, "").toUpperCase();
+  return `MBOT-${raw.slice(0,4)}-${raw.slice(4,8)}-${raw.slice(8,12)}-${raw.slice(12,16)}`;
+}
+
+// ── Bot keys.json sync ──────────────────────────────────────────
+// Writes a new license entry into the bot's keys.json so the bot
+// can validate it locally (or via /api/validate-license below).
+
+function writeBotKey(key, entry) {
+  let botKeys = {};
+  if (fs.existsSync(BOT_KEYS_FILE)) {
+    try { botKeys = JSON.parse(fs.readFileSync(BOT_KEYS_FILE, "utf8")); } catch {}
+  }
+  botKeys[key] = entry;
+  fs.writeFileSync(BOT_KEYS_FILE, JSON.stringify(botKeys, null, 2));
+  console.log(`[BotKeys] Wrote ${key} → ${BOT_KEYS_FILE}`);
 }
 
 // ── Stripe setup ───────────────────────────────────────────────
@@ -145,15 +169,62 @@ app.delete("/api/licenses/:key", requireAuth, (req, res) => {
 });
 
 // ─── Stripe checkout session ──────────────────────────────────
+// Supports two modes:
+//   { tier, email }         — single tier purchase (legacy)
+//   { modules: [...], email } — per-module selection from /buy page
 
 app.post("/api/checkout", (req, res) => {
   if (!stripe) {
     return res.status(400).json({ error: "Stripe not configured" });
   }
 
-  const { tier, email } = req.body;
-  const tierData = pricing[tier];
+  const { tier, modules: selectedModules, email } = req.body;
+  const domain = process.env.DOMAIN || "http://localhost:3001";
 
+  // Per-module selection mode
+  if (selectedModules && Array.isArray(selectedModules)) {
+    if (!email) return res.status(400).json({ error: "Email required" });
+    if (!selectedModules.length) return res.status(400).json({ error: "Select at least one module" });
+
+    // Compute total from pricing.json
+    let totalCents = 0;
+    const purchasedModuleSet = new Set();
+    const lineItems = [];
+
+    for (const m of selectedModules) {
+      const p = pricing[m];
+      if (!p) return res.status(400).json({ error: `Unknown module: ${m}` });
+      totalCents += Math.round(p.price * 100);
+      (p.modules || []).forEach(mod => purchasedModuleSet.add(mod));
+      lineItems.push({
+        price_data: {
+          currency: "usd",
+          product_data: { name: `Mystery Bot — ${p.name}`, description: p.description },
+          unit_amount: Math.round(p.price * 100),
+        },
+        quantity: 1,
+      });
+    }
+
+    const moduleList = [...purchasedModuleSet].join(",");
+
+    return stripe.checkout.sessions.create({
+      payment_method_types: ["card"],
+      mode: "payment",
+      line_items: lineItems,
+      customer_email: email,
+      success_url: `${domain}/success?session={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${domain}/buy`,
+      metadata: { modules: moduleList, email, tier: selectedModules.join(",") },
+    }).then(session => {
+      res.json({ sessionId: session.id, url: session.url });
+    }).catch(err => {
+      res.status(500).json({ error: err.message });
+    });
+  }
+
+  // Legacy single-tier mode
+  const tierData = pricing[tier];
   if (!tierData) {
     return res.status(400).json({ error: "Unknown tier" });
   }
@@ -175,9 +246,9 @@ app.post("/api/checkout", (req, res) => {
       },
     ],
     customer_email: email,
-    success_url: `${process.env.DOMAIN || "http://localhost:3001"}/success?session={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${process.env.DOMAIN || "http://localhost:3001"}/cancel`,
-    metadata: { tier, email },
+    success_url: `${domain}/success?session={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${domain}/buy`,
+    metadata: { tier, email, modules: (tierData.modules || []).join(",") },
   }).then(session => {
     res.json({ sessionId: session.id, url: session.url });
   }).catch(err => {
@@ -187,55 +258,128 @@ app.post("/api/checkout", (req, res) => {
 
 // ─── Stripe webhook (license auto-generation) ─────────────────
 
+// Pending licenses keyed by Stripe session ID — read by /success page
+const pendingLicenses = {};
+
 app.post("/api/webhooks/stripe", express.raw({ type: "application/json" }), (req, res) => {
   if (!stripe) return res.status(400).send("Stripe not configured");
 
-  const sig = req.headers["stripe-signature"];
+  const sig           = req.headers["stripe-signature"];
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
-  if (!webhookSecret) {
-    console.warn("[Stripe] STRIPE_WEBHOOK_SECRET not set");
-    return res.status(400).send("Webhook secret not configured");
-  }
-
   let event;
-  try {
-    event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
-  } catch (err) {
-    return res.status(400).send(`Webhook error: ${err.message}`);
+  if (webhookSecret) {
+    try {
+      event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
+    } catch (err) {
+      return res.status(400).send(`Webhook error: ${err.message}`);
+    }
+  } else {
+    // Dev mode: accept raw JSON (no signature verification)
+    console.warn("[Stripe] STRIPE_WEBHOOK_SECRET not set — skipping signature check");
+    try {
+      event = JSON.parse(req.body.toString());
+    } catch (err) {
+      return res.status(400).send("Invalid JSON");
+    }
   }
 
-  // Handle payment success
   if (event.type === "checkout.session.completed") {
     const session = event.data.object;
-    const { tier, email } = session.metadata;
+    const { tier, email, modules: moduleList } = session.metadata;
 
-    if (!pricing[tier]) {
-      console.error(`[Stripe] Unknown tier: ${tier}`);
-      return res.status(400).send("Unknown tier");
+    // Resolve modules from metadata
+    let resolvedModules = [];
+    if (moduleList) {
+      resolvedModules = moduleList.split(",").filter(Boolean);
+    } else if (tier && pricing[tier]) {
+      resolvedModules = pricing[tier].modules || [];
     }
 
-    // Generate license
-    const key = `MBOT-${uuidv4().slice(0, 8).toUpperCase()}`;
+    // Deduplicate
+    resolvedModules = [...new Set(resolvedModules)];
+
+    // Generate proper MBOT key
+    const key     = generateKey();
     const expires = new Date();
     expires.setDate(expires.getDate() + 365); // 1-year license
 
-    licenses[key] = {
-      tier,
-      label: email,
-      modules: pricing[tier].modules,
-      created: new Date().toISOString(),
-      expires: expires.toISOString(),
+    const licenseEntry = {
+      tier:      tier || "custom",
+      label:     email,
+      modules:   resolvedModules,
+      created:   new Date().toISOString(),
+      expires:   expires.toISOString(),
       paymentId: session.payment_intent,
+      stripeSessionId: session.id,
+      guildId:   null, // set when user runs /license in Discord
     };
 
+    // Store in dashboard licenses
+    licenses[key] = licenseEntry;
     save(LICENSES_FILE, licenses);
 
-    // TODO: Email key to customer
-    console.log(`[License] Generated for ${email}: ${key}`);
+    // Write to bot's keys.json so /license command can validate locally
+    writeBotKey(key, licenseEntry);
+
+    // Cache for /api/pending-license endpoint (success page pickup)
+    pendingLicenses[session.id] = { key, ...licenseEntry };
+
+    // TODO: Send email to customer with key (plug in SendGrid / Resend here)
+    console.log(`[License] Generated ${key} for ${email} — modules: ${resolvedModules.join(", ")}`);
   }
 
   res.json({ received: true });
+});
+
+// ─── Pending license lookup (for success page) ────────────────
+// The success page calls this with ?session=SESSION_ID to get the key.
+
+app.get("/api/pending-license", (req, res) => {
+  const { session } = req.query;
+  if (!session) return res.status(400).json({ error: "session required" });
+
+  const pending = pendingLicenses[session];
+  if (!pending) {
+    // Try looking up in licenses by stripeSessionId (persisted)
+    const found = Object.entries(licenses).find(
+      ([, v]) => v.stripeSessionId === session
+    );
+    if (found) return res.json({ key: found[0], ...found[1] });
+    return res.status(404).json({ error: "License not found yet. Try again in a moment." });
+  }
+
+  res.json(pending);
+});
+
+// ─── Validate license (called by bot's manager.js) ────────────
+
+app.post("/api/validate-license", (req, res) => {
+  const { key, guildId } = req.body;
+  if (!key) return res.json({ valid: false, reason: "No key provided" });
+
+  const entry = licenses[key.trim()];
+  if (!entry) {
+    // Also check bot's own keys.json
+    let botKeys = {};
+    try { botKeys = JSON.parse(fs.readFileSync(BOT_KEYS_FILE, "utf8")); } catch {}
+    const botEntry = botKeys[key.trim()];
+    if (!botEntry) return res.json({ valid: false, reason: "Unknown key" });
+
+    const expired = botEntry.expires && new Date(botEntry.expires) < new Date();
+    if (expired) return res.json({ valid: false, reason: "Expired" });
+    if (botEntry.guildId && guildId && botEntry.guildId !== guildId) {
+      return res.json({ valid: false, reason: "Bound to different guild" });
+    }
+    return res.json({ valid: true, modules: botEntry.modules, tier: botEntry.tier });
+  }
+
+  const expired = entry.expires && new Date(entry.expires) < new Date();
+  if (expired) return res.json({ valid: false, reason: "Expired" });
+  if (entry.guildId && guildId && entry.guildId !== guildId) {
+    return res.json({ valid: false, reason: "Bound to different guild" });
+  }
+  res.json({ valid: true, modules: entry.modules, tier: entry.tier });
 });
 
 // ─── GET dashboard config (for frontend) ──────────────────────
@@ -255,6 +399,23 @@ app.post("/api/settings", requireAuth, (req, res) => {
   if (stripeKey) config.stripeKey = stripeKey;
   save(CONFIG_FILE, config);
   res.json({ success: true });
+});
+
+// ── Customer-facing pages ───────────────────────────────────────
+
+// /buy  — module selection + checkout page (public)
+app.get("/buy", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "buy.html"));
+});
+
+// /success — post-payment key reveal page (public)
+app.get("/success", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "success.html"));
+});
+
+// /cancel — return to buy page
+app.get("/cancel", (req, res) => {
+  res.redirect("/buy");
 });
 
 // ── 404 / Static ───────────────────────────────────────────────

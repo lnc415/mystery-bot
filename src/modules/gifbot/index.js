@@ -1,98 +1,74 @@
 /**
  * GIF Bot Module
  * ─────────────────────────────────────────────────────────────────
- * Responds to /gif with a random GIF from:
- *   • local folder  (GIF_SOURCE=local, GIF_PATH=./gifs)
- *   • URL list file (GIF_SOURCE=url,   GIF_PATH=./gifs/urls.txt)
+ * Responds to /gif with a random image from (in priority order):
+ *   1. Google Drive folder  (if configured via /setup gifbot drive:URL)
+ *   2. Local folder         (assets/gifs/ or ./gifs/)
+ *   3. Built-in defaults    (hardcoded fallback GIF URLs)
  *
  * Free tier — no license required.
+ * Drive config is read from guilds.json via guildConfig.
  * ─────────────────────────────────────────────────────────────────
  */
 
-const { SlashCommandBuilder, AttachmentBuilder } = require("discord.js");
-const fs     = require("fs");
-const path   = require("path");
-const config = require("../../config");
+const {
+  SlashCommandBuilder,
+  EmbedBuilder,
+  AttachmentBuilder,
+} = require("discord.js");
+const fs   = require("fs");
+const path = require("path");
 
-const GIF_EXTENSIONS = [".gif", ".mp4", ".webm"];
+const { getRandomImage } = require("../../lib/imageSources");
 
-function getAllowedChannels() {
-  if (config.gif.channels === "all") return null; // null = all channels allowed
-  return config.gif.channels.split(",").map((s) => s.trim());
-}
-
-function pickLocalGif() {
-  const gifDir = path.resolve(config.gif.path);
-
-  if (!fs.existsSync(gifDir)) {
-    throw new Error(`GIF directory not found: ${gifDir}`);
-  }
-
-  const files = fs.readdirSync(gifDir).filter((f) =>
-    GIF_EXTENSIONS.includes(path.extname(f).toLowerCase())
-  );
-
-  if (!files.length) throw new Error("No GIFs found in directory.");
-
-  const chosen = files[Math.floor(Math.random() * files.length)];
-  return path.join(gifDir, chosen);
-}
-
-function pickUrlGif() {
-  const urlsFile = path.resolve(config.gif.path);
-
-  if (!fs.existsSync(urlsFile)) {
-    throw new Error(`URL list not found: ${urlsFile}`);
-  }
-
-  const urls = fs.readFileSync(urlsFile, "utf8")
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean);
-
-  if (!urls.length) throw new Error("No URLs in list.");
-
-  return urls[Math.floor(Math.random() * urls.length)];
+function sourceLabel(source) {
+  if (source === "drive") return "Google Drive";
+  if (source === "local") return "Local Folder";
+  return "Built-in";
 }
 
 // ── Slash command definition ───────────────────────────────────
 
 const command = new SlashCommandBuilder()
-  .setName(config.gif.command)
+  .setName("gif")
   .setDescription("Drop a random detective GIF");
 
-// ── Register ───────────────────────────────────────────────────
+// ── Slash command handler ──────────────────────────────────────
 
-function register(client) {
-  console.log(`[GifBot] Active — source: ${config.gif.source}, command: /${config.gif.command}`);
+async function execute(interaction) {
+  await interaction.deferReply();
 
-  const allowedChannels = getAllowedChannels();
+  try {
+    const guildId = interaction.guildId;
+    const image   = await getRandomImage(guildId);
+    const footer  = `From: ${sourceLabel(image.source)} • Mystery Bot`;
 
-  client.on("interactionCreate", async (interaction) => {
-    if (!interaction.isChatInputCommand()) return;
-    if (interaction.commandName !== config.gif.command) return;
-
-    // Channel filter
-    if (allowedChannels && !allowedChannels.includes(interaction.channelId)) {
-      return interaction.reply({ content: "GIFs aren't allowed in this channel.", ephemeral: true });
+    if (image.source === "local") {
+      const attachment = new AttachmentBuilder(image.url);
+      const embed = new EmbedBuilder()
+        .setImage(`attachment://${path.basename(image.url)}`)
+        .setFooter({ text: footer });
+      await interaction.editReply({ files: [attachment], embeds: [embed] });
+    } else {
+      const embed = new EmbedBuilder()
+        .setImage(image.url)
+        .setFooter({ text: footer });
+      await interaction.editReply({ embeds: [embed] });
     }
-
-    await interaction.deferReply();
-
-    try {
-      if (config.gif.source === "url") {
-        const url = pickUrlGif();
-        await interaction.editReply(url);
-      } else {
-        const filePath = pickLocalGif();
-        const attachment = new AttachmentBuilder(filePath);
-        await interaction.editReply({ files: [attachment] });
-      }
-    } catch (err) {
-      console.error("[GifBot]", err.message);
-      await interaction.editReply("Couldn't find a GIF. Check the GIF_PATH config.");
-    }
-  });
+  } catch (err) {
+    console.error("[GifBot]", err.message);
+    await interaction.editReply(
+      "Couldn't find a GIF right now. Try again or ask an admin to check the config."
+    );
+  }
 }
 
-module.exports = { register, command };
+// ── Register (event-based fallback for legacy index.js loader) ─
+
+function register(client) {
+  console.log("[GifBot] Active — command: /gif");
+  // Slash command interactions are handled by index.js commandHandlers dispatch.
+  // Nothing needed here for the SaaS model.
+}
+
+module.exports = { register, command, execute };
