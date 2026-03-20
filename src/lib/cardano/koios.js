@@ -71,6 +71,9 @@ async function getAssetTxs(policyId, assetNameHex, limit = 25) {
   // Only pass _asset_name if there's actually a name to filter on
   if (assetNameHex) params._asset_name = assetNameHex;
 
+  // Return newest transactions first so our limit covers the most recent activity
+  params.order = "block_height.desc";
+
   const res = await client.get("/asset_txs", { params });
   return Array.isArray(res.data) ? res.data.slice(0, limit) : [];
 }
@@ -199,14 +202,18 @@ async function getRecentTrades(policyId) {
   // Step 1: Resolve asset name hex
   const assetNameHex = await getAssetNameHex(policyId);
 
-  // Step 2: Get recent transactions
+  // Step 2: Get recent transactions (newest first, 90-min window matches seenTrades TTL)
   const txs = await getAssetTxs(policyId, assetNameHex, 20);
   if (txs.length === 0) return [];
+
+  const cutoff = Math.floor(Date.now() / 1000) - 90 * 60; // 90 minutes ago
+  const recentTxs = txs.filter((tx) => (tx.block_time || 0) >= cutoff);
+  if (recentTxs.length === 0) return [];
 
   // Step 3: Classify each tx
   const trades = [];
 
-  for (const tx of txs) {
+  for (const tx of recentTxs) {
     const txHash = tx.tx_hash;
     if (!txHash) continue;
 
