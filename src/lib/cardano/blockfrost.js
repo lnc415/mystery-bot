@@ -51,14 +51,21 @@ async function getAssetTransactions(policyId, assetNameHex, apiKey) {
   const assetUnit = buildAssetUnit(policyId, assetNameHex);
 
   const res = await client.get(`/assets/${assetUnit}/transactions`, {
-    params: { count: 10, order: "desc" },
+    params: { count: 25, order: "desc" },
   });
 
   const raw = Array.isArray(res.data) ? res.data : [];
-  return raw.map((t) => ({
-    txHash:    t.tx_hash || "",
-    blockTime: t.block_time || Math.floor(Date.now() / 1000),
-  }));
+
+  // Only keep transactions from the last 10 minutes to avoid
+  // re-processing old history after a bot restart
+  const cutoff = Math.floor(Date.now() / 1000) - 600;
+
+  return raw
+    .map((t) => ({
+      txHash:    t.tx_hash || "",
+      blockTime: t.block_time || Math.floor(Date.now() / 1000),
+    }))
+    .filter((t) => t.blockTime >= cutoff);
 }
 
 /**

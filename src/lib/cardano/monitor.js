@@ -23,10 +23,12 @@ const blockfrost = require("./blockfrost");
 const guildConfig = require("../guildConfig");
 
 // ── Deduplication store ────────────────────────────────────────
-// Map<guildId, Set<txHash>> — prevents the same trade from alerting twice.
+// Map<guildId, Map<txHash, timestamp>> — prevents double-alerts.
+// Stores when each hash was first seen so we can expire old entries.
 const seenTrades = new Map();
 
-const MAX_SEEN = 500; // cap per guild to prevent unbounded memory growth
+const MAX_SEEN    = 500;
+const SEEN_TTL_MS = 10 * 60 * 1000; // forget hashes older than 10 minutes
 
 // ── Config ─────────────────────────────────────────────────────
 
@@ -93,28 +95,49 @@ function shortHash(txHash) {
 }
 
 /**
- * Add a txHash to the guild's seen set, evicting the oldest when over limit.
+ * Add a txHash to the guild's seen map with current timestamp.
+ * Expires entries older than SEEN_TTL_MS so reclassified txs can re-fire
+ * after a bot restart or code fix.
  * @param {string} guildId
  * @param {string} txHash
  */
 function markSeen(guildId, txHash) {
-  if (!seenTrades.has(guildId)) seenTrades.set(guildId, new Set());
-  const set = seenTrades.get(guildId);
-  if (set.size >= MAX_SEEN) {
-    // Delete the oldest entry (first value in insertion order)
-    set.delete(set.values().next().value);
+  if (!seenTrades.has(guildId)) seenTrades.set(guildId, new Map());
+  const map = seenTrades.get(guildId);
+
+  // Evict expired entries to keep memory bounded
+  const now = Date.now();
+  if (map.size >= MAX_SEEN) {
+    for (const [hash, ts] of map) {
+      if (now - ts > SEEN_TTL_MS) map.delete(hash);
+      if (map.size < MAX_SEEN) break;
+    }
+    // If still over limit, delete oldest
+    if (map.size >= MAX_SEEN) {
+      map.delete(map.keys().next().value);
+    }
   }
-  set.add(txHash);
+
+  map.set(txHash, now);
 }
 
 /**
- * Check if a txHash has already been alerted for a guild.
+ * Check if a txHash was seen recently (within SEEN_TTL_MS).
+ * Returns false for old entries so fixed classification can re-fire them.
  * @param {string} guildId
  * @param {string} txHash
  * @returns {boolean}
  */
 function hasSeen(guildId, txHash) {
-  return seenTrades.has(guildId) && seenTrades.get(guildId).has(txHash);
+  if (!seenTrades.has(guildId)) return false;
+  const map = seenTrades.get(guildId);
+  if (!map.has(txHash)) return false;
+  // Expire old entries — allows re-firing after bot restart/code fix
+  if (Date.now() - map.get(txHash) > SEEN_TTL_MS) {
+    map.delete(txHash);
+    return false;
+  }
+  return true;
 }
 
 // ── Trade fetching ─────────────────────────────────────────────

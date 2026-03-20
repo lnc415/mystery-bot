@@ -51,7 +51,7 @@ async function getAssetNameHex(policyId) {
  * @param {number} limit
  * @returns {Promise<Array<{ tx_hash, block_time }>>}
  */
-async function getAssetTxs(policyId, assetNameHex, limit = 20) {
+async function getAssetTxs(policyId, assetNameHex, limit = 25) {
   const params = {
     _asset_policy: policyId,
     limit,
