@@ -252,39 +252,40 @@ async function fetchNewTrades(guildId) {
   // Resolve asset name hex once (cached after first call)
   const assetNameHex = await resolveAssetNameHex(policyId);
 
-  // ── Run Koios + Blockfrost in parallel ────────────────────────
-  const [koiosTrades, blockfrostTrades] = await Promise.allSettled([
-    koios.getRecentTrades(policyId),
-    fetchBlockfrostTrades(policyId, assetNameHex),
-  ]);
-
-  const koiosResults      = koiosTrades.status      === "fulfilled" ? koiosTrades.value      : [];
-  const blockfrostResults = blockfrostTrades.status === "fulfilled" ? blockfrostTrades.value : [];
-
-  if (koiosTrades.status === "rejected") {
-    console.warn(`[Monitor/${guildId}] Koios failed: ${koiosTrades.reason?.message}`);
-  }
-  if (blockfrostTrades.status === "rejected") {
-    console.warn(`[Monitor/${guildId}] Blockfrost failed: ${blockfrostTrades.reason?.message}`);
+  // ── Blockfrost primary, Koios fallback ────────────────────────
+  // Try Blockfrost first — it's more reliable and returns newest-first.
+  // Only call Koios if Blockfrost returns nothing (downtime / rate limit).
+  let blockfrostResults = [];
+  try {
+    blockfrostResults = await fetchBlockfrostTrades(policyId, assetNameHex);
+  } catch (err) {
+    console.warn(`[Monitor/${guildId}] Blockfrost failed: ${err.message}`);
   }
 
-  // Tag Koios results with source
-  const koiosTagged = koiosResults.map((t) => ({ ...t, source: "Koios" }));
+  let merged = blockfrostResults;
 
-  // Merge all trades — Blockfrost first so its address-based classification
-  // wins over Koios when both sources find the same txHash.
-  // Blockfrost classification is more reliable for Minswap batched DEX model.
-  const allTrades = [...blockfrostResults, ...koiosTagged];
+  if (blockfrostResults.length === 0) {
+    console.warn(`[Monitor/${guildId}] Blockfrost returned 0 trades — trying Koios fallback`);
+    try {
+      const koiosResults = await koios.getRecentTrades(policyId);
+      merged = koiosResults.map((t) => ({ ...t, source: "Koios" }));
+      if (merged.length > 0) {
+        console.log(`[Monitor/${guildId}] Koios fallback: ${merged.length} trade(s)`);
+      }
+    } catch (err) {
+      console.warn(`[Monitor/${guildId}] Koios fallback also failed: ${err.message}`);
+    }
+  }
+
+  // Deduplicate by txHash (safety net for any duplicate entries)
   const seenHashes = new Set();
-  const merged = [];
+  merged = merged.filter((t) => {
+    if (!t.txHash || seenHashes.has(t.txHash)) return false;
+    seenHashes.add(t.txHash);
+    return true;
+  });
 
-  for (const trade of allTrades) {
-    if (!trade.txHash || seenHashes.has(trade.txHash)) continue;
-    seenHashes.add(trade.txHash);
-    merged.push(trade);
-  }
-
-  console.log(`[Monitor/${guildId}] Poll: ${koiosTagged.length} Koios + ${blockfrostResults.length} Blockfrost = ${merged.length} unique trades`);
+  console.log(`[Monitor/${guildId}] Poll: ${merged.length} trade(s) via ${blockfrostResults.length > 0 ? "Blockfrost" : "Koios fallback"}`);
 
   // ── Deduplicate against already-alerted trades ────────────────
   const newTrades = [];
