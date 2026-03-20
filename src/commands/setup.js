@@ -65,17 +65,20 @@ async function handleSellbot(interaction) {
   if (requiresLicense(interaction, "sellbot")) return;
 
   const policyId = interaction.options.getString("policy");
+  const ticker   = interaction.options.getString("ticker") || "$TOKEN";
   const channel  = interaction.options.getChannel("channel");
   const guildId  = interaction.guildId;
 
   setModuleConfig(guildId, "sellbot", {
-    policyId:  policyId,
+    policyId,
+    ticker,
     channelId: channel.id,
   });
 
   return interaction.reply({
     content:
       `✅ **Sell Alerts configured!**\n` +
+      `Token: **${ticker}**\n` +
       `Monitoring policy \`${policyId.slice(0, 16)}…\` → <#${channel.id}>\n\n` +
       `Sell alerts will post there whenever a sell is detected.`,
     ephemeral: true,
@@ -283,6 +286,12 @@ const command = new SlashCommandBuilder()
         opt
           .setName("policy")
           .setDescription("Cardano token policy ID to monitor for sells")
+          .setRequired(true)
+      )
+      .addStringOption((opt) =>
+        opt
+          .setName("ticker")
+          .setDescription("Token ticker symbol shown in alerts (e.g. $NIGHT, $141)")
           .setRequired(true)
       )
       .addChannelOption((opt) =>
