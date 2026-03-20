@@ -202,4 +202,4 @@ async function getRecentTrades(policyId) {
   return trades;
 }
 
-module.exports = { getRecentTrades, getAssetNameHex };
+module.exports = { getRecentTrades, getAssetNameHex, getAssetTxs };

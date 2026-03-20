@@ -153,11 +153,17 @@ async function resolveAssetNameHex(policyId) {
   if (assetNameCache.has(policyId)) return assetNameCache.get(policyId);
 
   // 1. Try Koios (free, no key)
+  // Only cache and return if Koios gives us a non-empty hex — an empty
+  // string means the policy exists but Koios couldn't resolve the name,
+  // so we fall through to Blockfrost rather than caching a bad value.
   try {
     const hex = await koios.getAssetNameHex(policyId);
-    assetNameCache.set(policyId, hex);
-    console.log(`[Monitor] Asset name resolved via Koios for ${policyId.slice(0,8)}…: "${hex}"`);
-    return hex;
+    if (hex) {
+      assetNameCache.set(policyId, hex);
+      console.log(`[Monitor] Asset name resolved via Koios for ${policyId.slice(0,8)}…: "${hex}"`);
+      return hex;
+    }
+    console.warn(`[Monitor] Koios returned empty asset name for ${policyId.slice(0,8)}… — trying Blockfrost`);
   } catch {
     console.warn(`[Monitor] Koios asset name lookup failed — trying Blockfrost`);
   }
