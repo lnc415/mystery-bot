@@ -129,12 +129,25 @@ async function classifyTx(txHash, policyId) {
   if (buyReceipts.length > 0) {
     const userAdaIn  = inputs.filter(isUser).reduce((s, u) => s + getLv(u), 0);
     const userAdaOut = outputs.filter(isUser).reduce((s, u) => s + getLv(u), 0);
-    // Use GROSS ADA from user wallet inputs when available (direct swap).
-    // For batched fills the user's wallet isn't an input so fall back to
-    // the absolute net — avoids showing 0 for the batched model.
-    const adaAmount  = userAdaIn > 0
-      ? userAdaIn / 1_000_000
-      : Math.abs(userAdaOut - userAdaIn) / 1_000_000;
+
+    let adaAmount;
+    if (userAdaIn > 0) {
+      // Direct swap: user wallet was an input — use gross ADA spent.
+      adaAmount = userAdaIn / 1_000_000;
+    } else {
+      // Batched fill (Minswap etc.): user's order was already in a script
+      // UTXO, so no user wallet input exists in the execution TX.
+      // The most accurate proxy is the pool's ADA gain: the pool UTXO
+      // (script address that ALSO holds the token) has more ADA out than in.
+      const poolInputs  = inputs.filter((u) => !isUser(u) && hasToken(u));
+      const poolOutputs = outputs.filter((u) => !isUser(u) && hasToken(u));
+      const poolAdaIn   = poolInputs.reduce((s, u)  => s + getLv(u), 0);
+      const poolAdaOut  = poolOutputs.reduce((s, u) => s + getLv(u), 0);
+      const poolDelta   = poolAdaOut - poolAdaIn; // positive = pool gained ADA (buy)
+      adaAmount = poolDelta > 0
+        ? poolDelta / 1_000_000
+        : Math.abs(userAdaOut) / 1_000_000; // last-resort fallback
+    }
 
     // Token amount received by user wallets
     const tokenAmount = buyReceipts.reduce((s, u) =>

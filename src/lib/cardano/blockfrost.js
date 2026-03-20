@@ -223,11 +223,20 @@ function extractAdaAmount(utxos, policyId, action = "other") {
   const adaOut = sumLovelace(userOutputs);
 
   if (action === "buy") {
-    // For buys, show GROSS ADA the user sent — not net after the min-UTXO
-    // returned with the tokens. E.g. user sends 5 ADA, gets back 1.67 ADA
-    // locked with tokens; net would show 3.33 but the user spent 5 ADA.
-    // If the user wallet has no inputs (batched fill tx), fall back to net.
-    return adaIn > 0n ? Number(adaIn) / 1_000_000 : Number(adaOut) / 1_000_000;
+    if (adaIn > 0n) {
+      // Direct swap: user wallet was an input — use gross ADA sent.
+      return Number(adaIn) / 1_000_000;
+    }
+    // Batched fill: measure the pool UTXO's ADA gain.
+    // The pool UTXO is the script address that also holds the token.
+    const poolInputs  = inputs.filter( (u) => !isUserAddress(u.address) && hasToken(u));
+    const poolOutputs = outputs.filter((u) => !isUserAddress(u.address) && hasToken(u));
+    const poolAdaIn   = sumLovelace(poolInputs);
+    const poolAdaOut  = sumLovelace(poolOutputs);
+    const poolDelta   = poolAdaOut - poolAdaIn; // positive = pool gained ADA
+    if (poolDelta > 0n) return Number(poolDelta) / 1_000_000;
+    // Last resort: return ADA the user received (still better than 0).
+    return Number(adaOut) / 1_000_000;
   }
 
   // For sells and other: absolute net ADA change at user wallets
