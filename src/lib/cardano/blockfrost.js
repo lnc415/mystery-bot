@@ -212,7 +212,7 @@ function classifyTransaction(utxos, policyId) {
  * @param {string} policyId
  * @returns {number} ADA amount
  */
-function extractAdaAmount(utxos, policyId) {
+function extractAdaAmount(utxos, policyId, action = "other") {
   const inputs  = utxos.inputs  || [];
   const outputs = utxos.outputs || [];
 
@@ -222,7 +222,15 @@ function extractAdaAmount(utxos, policyId) {
   const adaIn  = sumLovelace(userInputs);
   const adaOut = sumLovelace(userOutputs);
 
-  // Net ADA moved by users (absolute value)
+  if (action === "buy") {
+    // For buys, show GROSS ADA the user sent — not net after the min-UTXO
+    // returned with the tokens. E.g. user sends 5 ADA, gets back 1.67 ADA
+    // locked with tokens; net would show 3.33 but the user spent 5 ADA.
+    // If the user wallet has no inputs (batched fill tx), fall back to net.
+    return adaIn > 0n ? Number(adaIn) / 1_000_000 : Number(adaOut) / 1_000_000;
+  }
+
+  // For sells and other: absolute net ADA change at user wallets
   const diff = adaIn > adaOut ? adaIn - adaOut : adaOut - adaIn;
   return Number(diff) / 1_000_000;
 }

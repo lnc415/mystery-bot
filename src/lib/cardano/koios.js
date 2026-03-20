@@ -127,10 +127,14 @@ async function classifyTx(txHash, policyId) {
   // ── BUY: token lands at a user wallet output ──────────────────
   const buyReceipts = outputs.filter((u) => isUser(u) && hasToken(u));
   if (buyReceipts.length > 0) {
-    // How much ADA did user wallets spend net?
     const userAdaIn  = inputs.filter(isUser).reduce((s, u) => s + getLv(u), 0);
     const userAdaOut = outputs.filter(isUser).reduce((s, u) => s + getLv(u), 0);
-    const adaAmount  = Math.abs(userAdaIn - userAdaOut) / 1_000_000;
+    // Use GROSS ADA from user wallet inputs when available (direct swap).
+    // For batched fills the user's wallet isn't an input so fall back to
+    // the absolute net — avoids showing 0 for the batched model.
+    const adaAmount  = userAdaIn > 0
+      ? userAdaIn / 1_000_000
+      : Math.abs(userAdaOut - userAdaIn) / 1_000_000;
 
     // Token amount received by user wallets
     const tokenAmount = buyReceipts.reduce((s, u) =>

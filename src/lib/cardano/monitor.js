@@ -214,7 +214,7 @@ async function fetchBlockfrostTrades(policyId, assetNameHex) {
       const utxos       = await blockfrost.getTransactionDetails(tx.txHash, BLOCKFROST_API_KEY);
       const action      = blockfrost.classifyTransaction(utxos, policyId);
       if (action === "other") continue;
-      const adaAmount   = blockfrost.extractAdaAmount(utxos, policyId);
+      const adaAmount   = blockfrost.extractAdaAmount(utxos, policyId, action);
       const tokenAmount = blockfrost.extractTokenAmount(utxos, policyId);
       trades.push({
         action,
