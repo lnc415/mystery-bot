@@ -38,8 +38,19 @@ async function getAssetNameHex(policyId) {
   const assets = Array.isArray(res.data) ? res.data : [];
   if (assets.length === 0) return "";
 
-  // Return the asset_name of the first (usually only) asset
-  return assets[0].asset_name || "";
+  // A policy can have multiple assets (e.g. NIGHT, ToBurn, empty-name leftovers).
+  // Pick the one with the highest total_supply — that's always the main token.
+  // Filter to non-empty names first so we don't return a blank asset name.
+  const named = assets.filter((a) => a.asset_name);
+  const pool  = named.length > 0 ? named : assets;
+
+  const main = pool.reduce((best, a) => {
+    const s = BigInt(a.total_supply || "0");
+    const b = BigInt(best.total_supply || "0");
+    return s > b ? a : best;
+  }, pool[0]);
+
+  return main.asset_name || "";
 }
 
 // ── Step 2: Get recent transactions ───────────────────────────
