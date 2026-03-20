@@ -253,8 +253,10 @@ async function fetchNewTrades(guildId) {
   // Tag Koios results with source
   const koiosTagged = koiosResults.map((t) => ({ ...t, source: "Koios" }));
 
-  // Merge all trades — deduplicate by txHash across sources
-  const allTrades = [...koiosTagged, ...blockfrostResults];
+  // Merge all trades — Blockfrost first so its address-based classification
+  // wins over Koios when both sources find the same txHash.
+  // Blockfrost classification is more reliable for Minswap batched DEX model.
+  const allTrades = [...blockfrostResults, ...koiosTagged];
   const seenHashes = new Set();
   const merged = [];
 
@@ -380,14 +382,25 @@ function buildLiquidityEmbed(event) {
  */
 async function postBuyAlert(client, guildId, trade) {
   const cfg = guildConfig.getModuleConfig(guildId, "buybot");
-  if (!cfg.channelId) return;
+  console.log(`[Monitor/${guildId}] postBuyAlert — channelId=${cfg.channelId} txHash=${trade.txHash?.slice(0,16)}…`);
+  if (!cfg.channelId) {
+    console.warn(`[Monitor/${guildId}] postBuyAlert: no channelId in buybot config — alert skipped`);
+    return;
+  }
   try {
     const tier     = getTier(trade.adaAmount || 0);
     const imageUrl = cfg.tiers?.[tier.key]?.imageUrl || null;
+    console.log(`[Monitor/${guildId}] Fetching channel ${cfg.channelId}…`);
     const ch = await client.channels.fetch(cfg.channelId);
-    if (ch) await ch.send({ embeds: [buildBuyEmbed(trade, tier, imageUrl)] });
+    if (!ch) {
+      console.warn(`[Monitor/${guildId}] Channel ${cfg.channelId} not found — bot may lack access`);
+      return;
+    }
+    console.log(`[Monitor/${guildId}] Sending buy embed to #${ch.name}`);
+    await ch.send({ embeds: [buildBuyEmbed(trade, tier, imageUrl)] });
+    console.log(`[Monitor/${guildId}] ✅ Buy alert posted — ${trade.adaAmount?.toFixed(2)} ADA | ${trade.txHash?.slice(0,16)}…`);
   } catch (err) {
-    console.error(`[Monitor/${guildId}] Failed to post buy alert: ${err.message}`);
+    console.error(`[Monitor/${guildId}] Failed to post buy alert: ${err.message}`, err.code || "");
   }
 }
 
@@ -399,12 +412,23 @@ async function postBuyAlert(client, guildId, trade) {
  */
 async function postSellAlert(client, guildId, trade) {
   const cfg = guildConfig.getModuleConfig(guildId, "sellbot");
-  if (!cfg.channelId) return;
+  console.log(`[Monitor/${guildId}] postSellAlert — channelId=${cfg.channelId} txHash=${trade.txHash?.slice(0,16)}…`);
+  if (!cfg.channelId) {
+    console.warn(`[Monitor/${guildId}] postSellAlert: no channelId in sellbot config — alert skipped`);
+    return;
+  }
   try {
+    console.log(`[Monitor/${guildId}] Fetching channel ${cfg.channelId}…`);
     const ch = await client.channels.fetch(cfg.channelId);
-    if (ch) await ch.send({ embeds: [buildSellEmbed(trade)] });
+    if (!ch) {
+      console.warn(`[Monitor/${guildId}] Channel ${cfg.channelId} not found — bot may lack access`);
+      return;
+    }
+    console.log(`[Monitor/${guildId}] Sending sell embed to #${ch.name}`);
+    await ch.send({ embeds: [buildSellEmbed(trade)] });
+    console.log(`[Monitor/${guildId}] ✅ Sell alert posted — ${trade.adaAmount?.toFixed(2)} ADA | ${trade.txHash?.slice(0,16)}…`);
   } catch (err) {
-    console.error(`[Monitor/${guildId}] Failed to post sell alert: ${err.message}`);
+    console.error(`[Monitor/${guildId}] Failed to post sell alert: ${err.message}`, err.code || "");
   }
 }
 
@@ -435,6 +459,7 @@ async function postLiquidityAlert(client, guildId, event) {
  */
 async function tick(client) {
   const activeGuilds = guildConfig.getActiveMonitoringGuilds();
+  console.log(`[Monitor] Tick — ${activeGuilds.length} active guild(s): [${activeGuilds.join(", ")}]`);
 
   for (const guildId of activeGuilds) {
     try {
@@ -444,12 +469,20 @@ async function tick(client) {
       const hasLiquidity = guildConfig.hasModule(guildId, "liquidity");
 
       for (const trade of newTrades) {
-        if (trade.isLiquidity) {
+        const action = trade.action;
+        console.log(`[Monitor/${guildId}] Routing: ${action} | ${trade.adaAmount?.toFixed(2)} ADA | hasBuybot=${hasBuybot} | hasSellbot=${hasSellbot} | hasLiquidity=${hasLiquidity}`);
+
+        if (action === "liquidity_add" || action === "liquidity_remove") {
           if (hasLiquidity) await postLiquidityAlert(client, guildId, trade);
-        } else if (trade.action === "buy") {
+          else console.log(`[Monitor/${guildId}] Skipped liquidity — module not licensed`);
+        } else if (action === "buy") {
           if (hasBuybot) await postBuyAlert(client, guildId, trade);
-        } else if (trade.action === "sell") {
+          else console.log(`[Monitor/${guildId}] Skipped buy — buybot not licensed`);
+        } else if (action === "sell") {
           if (hasSellbot) await postSellAlert(client, guildId, trade);
+          else console.log(`[Monitor/${guildId}] Skipped sell — sellbot not licensed`);
+        } else {
+          console.log(`[Monitor/${guildId}] Unknown action "${action}" — skipping`);
         }
       }
     } catch (err) {

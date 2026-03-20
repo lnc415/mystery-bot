@@ -65,6 +65,26 @@ async function getAssetTxs(policyId, assetNameHex, limit = 25) {
 }
 
 // ── Step 3: Classify tx as buy/sell via UTXO data ─────────────
+//
+// Koios /tx_utxos response shape (per UTXO entry):
+//   payment_addr.bech32  — bech32 address string
+//   value                — lovelace as a STRING (e.g. "5000000")
+//   asset_list           — array of { policy_id, asset_name, quantity }
+//
+// We use the same address-based heuristic as Blockfrost:
+//   BUY:  token appears at a user wallet (addr1q) in outputs
+//   SELL: token in script inputs AND user wallet receives ADA in outputs
+//
+// This avoids the broken "sum all ADA" method which always returns "sell"
+// because tx fees make total adaOut < adaIn for every Cardano transaction.
+
+/**
+ * Returns true if the address is a user wallet (not a script/DEX contract).
+ * Cardano user wallets start with addr1q; script addresses start with addr1w.
+ */
+function isUserAddr(address) {
+  return typeof address === "string" && address.startsWith("addr1q");
+}
 
 /**
  * Fetch UTXO details for a tx and classify as buy/sell.
@@ -83,32 +103,59 @@ async function classifyTx(txHash, policyId) {
   const inputs  = utxoData.inputs  || [];
   const outputs = utxoData.outputs || [];
 
-  // Sum ADA on inputs vs outputs to determine direction
-  let adaIn  = 0;
-  let adaOut = 0;
-  let tokenOut = 0;
+  // Helper: does this UTXO contain the monitored token?
+  const hasToken = (u) =>
+    (u.asset_list || []).some((a) => a.policy_id === policyId);
 
-  for (const inp of inputs) {
-    for (const v of (inp.value || [])) {
-      if (v.unit === "lovelace") adaIn += Number(v.quantity || 0);
-    }
+  // Helper: lovelace value (Koios stores it as a string)
+  const getLv = (u) => Number(u.value || 0);
+
+  // Helper: is this a user wallet address?
+  const isUser = (u) => isUserAddr(u.payment_addr?.bech32);
+
+  // ── BUY: token lands at a user wallet output ──────────────────
+  const buyReceipts = outputs.filter((u) => isUser(u) && hasToken(u));
+  if (buyReceipts.length > 0) {
+    // How much ADA did user wallets spend net?
+    const userAdaIn  = inputs.filter(isUser).reduce((s, u) => s + getLv(u), 0);
+    const userAdaOut = outputs.filter(isUser).reduce((s, u) => s + getLv(u), 0);
+    const adaAmount  = Math.abs(userAdaIn - userAdaOut) / 1_000_000;
+
+    // Token amount received by user wallets
+    const tokenAmount = buyReceipts.reduce((s, u) =>
+      s + (u.asset_list || [])
+        .filter((a) => a.policy_id === policyId)
+        .reduce((t, a) => t + Number(a.quantity || 0), 0),
+    0);
+
+    return { action: "buy", adaAmount, tokenAmount };
   }
 
-  for (const out of outputs) {
-    for (const v of (out.value || [])) {
-      if (v.unit === "lovelace") adaOut += Number(v.quantity || 0);
-      // Token amounts on outputs (buyer receiving tokens)
-      if (v.unit && v.unit.startsWith(policyId) && v.unit !== "lovelace") {
-        tokenOut += Number(v.quantity || 0);
-      }
-    }
+  // ── Check if token is involved at all ─────────────────────────
+  const tokenInvolved = [...inputs, ...outputs].some(hasToken);
+  if (!tokenInvolved) return null;
+
+  // ── SELL: token in script inputs + user receives ADA ──────────
+  const tokenInScriptInputs = inputs.some((u) => !isUser(u) && hasToken(u));
+  const userReceivesAda     = outputs.some((u) => isUser(u) && getLv(u) > 2_000_000);
+
+  if (tokenInScriptInputs && userReceivesAda) {
+    const userAdaIn  = inputs.filter(isUser).reduce((s, u) => s + getLv(u), 0);
+    const userAdaOut = outputs.filter(isUser).reduce((s, u) => s + getLv(u), 0);
+    const adaAmount  = Math.abs(userAdaOut - userAdaIn) / 1_000_000;
+    return { action: "sell", adaAmount, tokenAmount: 0 };
   }
 
-  const netAda    = (adaOut - adaIn) / 1_000_000;
-  const adaAmount = Math.abs(netAda);
-  const action    = netAda > 0 ? "buy" : "sell";
+  // Direct sell: token leaves from user wallet input
+  const directSell = inputs.some((u) => isUser(u) && hasToken(u));
+  if (directSell) {
+    const userAdaIn  = inputs.filter(isUser).reduce((s, u) => s + getLv(u), 0);
+    const userAdaOut = outputs.filter(isUser).reduce((s, u) => s + getLv(u), 0);
+    const adaAmount  = Math.abs(userAdaOut - userAdaIn) / 1_000_000;
+    return { action: "sell", adaAmount, tokenAmount: 0 };
+  }
 
-  return { action, adaAmount, tokenAmount: tokenOut };
+  return null;
 }
 
 // ── Public API ─────────────────────────────────────────────────
