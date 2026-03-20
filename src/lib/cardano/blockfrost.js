@@ -76,20 +76,23 @@ async function getTransactionDetails(txHash, apiKey) {
   };
 }
 
-// ── Pool-based classification ──────────────────────────────────
+// ── Address-based classification ───────────────────────────────
+//
+// Cardano address prefixes:
+//   addr1q... = user wallet (key-based)    → buyer/seller
+//   addr1w... = script address (DEX/contract) → pool/order contract
+//
+// This approach tracks WHERE tokens actually land, not pool internals.
+// Works across all Cardano DEX architectures (Minswap, SundaeSwap, etc.)
+// including batched order models where pool UTXOs don't carry token amounts.
 
 /**
- * Find UTXOs that contain the tracked token (pool UTXOs).
- * @param {Array} utxos
- * @param {string} policyId
- * @returns {Array}
+ * Returns true if the address is a user wallet (not a script/DEX contract).
+ * @param {string} address
+ * @returns {boolean}
  */
-function findPoolUtxos(utxos, policyId) {
-  return utxos.filter((u) =>
-    (u.amount || []).some(
-      (a) => a.unit !== "lovelace" && a.unit.startsWith(policyId)
-    )
-  );
+function isUserAddress(address) {
+  return typeof address === "string" && address.startsWith("addr1q");
 }
 
 /**
@@ -105,106 +108,126 @@ function sumLovelace(utxos) {
 }
 
 /**
- * Classify a transaction using pool UTXO ADA flow.
+ * Sum token quantity for our policy across a list of UTXOs.
+ * @param {Array} utxos
+ * @param {string} policyId
+ * @returns {bigint}
+ */
+function sumTokens(utxos, policyId) {
+  return utxos.reduce((sum, u) => {
+    for (const a of u.amount || []) {
+      if (a.unit !== "lovelace" && a.unit.startsWith(policyId)) {
+        sum += BigInt(a.quantity || 0);
+      }
+    }
+    return sum;
+  }, 0n);
+}
+
+/**
+ * Classify a transaction by tracking token flow to/from user wallets.
  *
- * Logic:
- *   Pool UTXOs are those containing the tracked token.
- *   If pool ADA OUT > pool ADA IN → pool gained ADA → buyer spent ADA → BUY
- *   If pool ADA OUT < pool ADA IN → pool lost ADA  → seller received ADA → SELL
+ * BUY:  token arrives at a user wallet address (addr1q) in outputs
+ * SELL: token leaves from a user wallet address (addr1q) in inputs
+ *
+ * This works for all Cardano DEX models including Minswap batching,
+ * SundaeSwap, Spectrum, and others — regardless of pool UTXO structure.
  *
  * @param {object} utxos     - { inputs, outputs }
  * @param {string} policyId
  * @returns {'buy'|'sell'|'liquidity_add'|'liquidity_remove'|'other'}
  */
 function classifyTransaction(utxos, policyId) {
-  const poolInputs  = findPoolUtxos(utxos.inputs  || [], policyId);
-  const poolOutputs = findPoolUtxos(utxos.outputs || [], policyId);
+  const inputs  = utxos.inputs  || [];
+  const outputs = utxos.outputs || [];
 
-  // No pool UTXOs found — unrelated tx
-  if (poolInputs.length === 0 && poolOutputs.length === 0) return "other";
+  // Outputs at user wallets that contain our token → BUY receipts
+  const buyReceipts = outputs.filter(
+    (u) =>
+      isUserAddress(u.address) &&
+      (u.amount || []).some(
+        (a) => a.unit !== "lovelace" && a.unit.startsWith(policyId)
+      )
+  );
 
-  const poolAdaIn  = sumLovelace(poolInputs);
-  const poolAdaOut = sumLovelace(poolOutputs);
+  // Inputs from user wallets that contain our token → SELL submissions
+  const sellSubmissions = inputs.filter(
+    (u) =>
+      isUserAddress(u.address) &&
+      (u.amount || []).some(
+        (a) => a.unit !== "lovelace" && a.unit.startsWith(policyId)
+      )
+  );
 
-  // Track token amounts in pool UTXOs
-  let tokenIn  = 0n;
-  let tokenOut = 0n;
+  if (buyReceipts.length > 0)     return "buy";
+  if (sellSubmissions.length > 0) return "sell";
 
-  for (const u of poolInputs) {
-    for (const a of u.amount || []) {
-      if (a.unit !== "lovelace" && a.unit.startsWith(policyId)) {
-        tokenIn += BigInt(a.quantity || 0);
-      }
-    }
+  // Both contract inputs and outputs contain the token → liquidity event
+  const contractTokenIn  = inputs.filter(
+    (u) => !isUserAddress(u.address) &&
+      (u.amount || []).some((a) => a.unit !== "lovelace" && a.unit.startsWith(policyId))
+  );
+  const contractTokenOut = outputs.filter(
+    (u) => !isUserAddress(u.address) &&
+      (u.amount || []).some((a) => a.unit !== "lovelace" && a.unit.startsWith(policyId))
+  );
+
+  if (contractTokenIn.length > 0 && contractTokenOut.length > 0) {
+    const tokenIn  = sumTokens(contractTokenIn,  policyId);
+    const tokenOut = sumTokens(contractTokenOut, policyId);
+    return tokenOut > tokenIn ? "liquidity_add" : "liquidity_remove";
   }
-  for (const u of poolOutputs) {
-    for (const a of u.amount || []) {
-      if (a.unit !== "lovelace" && a.unit.startsWith(policyId)) {
-        tokenOut += BigInt(a.quantity || 0);
-      }
-    }
-  }
 
-  const adaDiff   = poolAdaOut - poolAdaIn;   // + means pool gained ADA (buy)
-  const tokenDiff = tokenOut   - tokenIn;     // + means pool gained tokens (sell)
-
-  if (adaDiff > 0n && tokenDiff < 0n) return "buy";
-  if (adaDiff < 0n && tokenDiff > 0n) return "sell";
-  if (adaDiff > 0n && tokenDiff > 0n) return "liquidity_add";
-  if (adaDiff < 0n && tokenDiff < 0n) return "liquidity_remove";
   return "other";
 }
 
 /**
- * Extract trade ADA amount (the pool's ADA change, i.e., what the buyer paid).
+ * Extract ADA amount spent/received by user wallets.
+ * For buys:  net ADA out of user wallets (what they paid)
+ * For sells: net ADA into user wallets (what they received)
+ *
  * @param {object} utxos
  * @param {string} policyId
  * @returns {number} ADA amount
  */
 function extractAdaAmount(utxos, policyId) {
-  const poolInputs  = findPoolUtxos(utxos.inputs  || [], policyId);
-  const poolOutputs = findPoolUtxos(utxos.outputs || [], policyId);
+  const inputs  = utxos.inputs  || [];
+  const outputs = utxos.outputs || [];
 
-  const poolAdaIn  = sumLovelace(poolInputs);
-  const poolAdaOut = sumLovelace(poolOutputs);
+  const userInputs  = inputs.filter((u) => isUserAddress(u.address));
+  const userOutputs = outputs.filter((u) => isUserAddress(u.address));
 
-  // Return absolute difference → how much ADA changed hands
-  const diff = poolAdaOut > poolAdaIn
-    ? poolAdaOut - poolAdaIn
-    : poolAdaIn  - poolAdaOut;
+  const adaIn  = sumLovelace(userInputs);
+  const adaOut = sumLovelace(userOutputs);
 
+  // Net ADA moved by users (absolute value)
+  const diff = adaIn > adaOut ? adaIn - adaOut : adaOut - adaIn;
   return Number(diff) / 1_000_000;
 }
 
 /**
- * Extract token amount moved for a given policy from pool UTXOs.
+ * Extract token amount received or sent by user wallets.
+ *
  * @param {object} utxos
  * @param {string} policyId
  * @returns {number}
  */
 function extractTokenAmount(utxos, policyId) {
-  const poolInputs  = findPoolUtxos(utxos.inputs  || [], policyId);
-  const poolOutputs = findPoolUtxos(utxos.outputs || [], policyId);
+  const inputs  = utxos.inputs  || [];
+  const outputs = utxos.outputs || [];
 
-  let tokenIn  = 0n;
-  let tokenOut = 0n;
+  // Tokens received at user wallets (buy) or sent from user wallets (sell)
+  const userOutputTokens = sumTokens(
+    outputs.filter((u) => isUserAddress(u.address)), policyId
+  );
+  const userInputTokens = sumTokens(
+    inputs.filter((u) => isUserAddress(u.address)), policyId
+  );
 
-  for (const u of poolInputs) {
-    for (const a of u.amount || []) {
-      if (a.unit !== "lovelace" && a.unit.startsWith(policyId)) {
-        tokenIn += BigInt(a.quantity || 0);
-      }
-    }
-  }
-  for (const u of poolOutputs) {
-    for (const a of u.amount || []) {
-      if (a.unit !== "lovelace" && a.unit.startsWith(policyId)) {
-        tokenOut += BigInt(a.quantity || 0);
-      }
-    }
-  }
+  const diff = userOutputTokens > userInputTokens
+    ? userOutputTokens - userInputTokens
+    : userInputTokens  - userOutputTokens;
 
-  const diff = tokenIn > tokenOut ? tokenIn - tokenOut : tokenOut - tokenIn;
   return Number(diff);
 }
 
