@@ -12,9 +12,21 @@
 
 require("dotenv").config();
 
+const http = require("http");
 const { Client, GatewayIntentBits, Partials } = require("discord.js");
 const config = require("./config");
 const { startMonitoring } = require("./lib/cardano/monitor");
+
+// ── Keepalive server ───────────────────────────────────────────
+// Replit free tier kills idle processes. This tiny HTTP server
+// keeps the Repl "awake" so UptimeRobot can ping it every 5 min.
+const PORT = process.env.PORT || 3000;
+http.createServer((req, res) => {
+  res.writeHead(200);
+  res.end("OK");
+}).listen(PORT, () => {
+  console.log(`[Keepalive] HTTP server listening on port ${PORT}`);
+});
 
 // ── Discord client ─────────────────────────────────────────────
 
