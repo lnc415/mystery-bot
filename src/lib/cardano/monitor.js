@@ -42,6 +42,13 @@ const SEEN_TTL_MS = 90 * 60 * 1000; // 90 minutes
 // silent drain for the fresh policy.
 const bootstrapped = new Set();
 
+// ── Tick mutex ─────────────────────────────────────────────────
+// Prevents overlapping tick executions. If Blockfrost is slow and a
+// tick takes longer than POLL_INTERVAL_MS, the next interval fires
+// before the previous one finishes. Without this guard both ticks
+// see the same "unseen" hashes and double-post the same trades.
+let _ticking = false;
+
 // ── Config ─────────────────────────────────────────────────────
 
 const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS || "30000", 10);
@@ -198,24 +205,50 @@ async function resolveAssetNameHex(policyId) {
 }
 
 /**
- * Fetch from Blockfrost and classify each tx.
+ * Fetch from Blockfrost, filter to unseen tx hashes, markSeen ALL of them
+ * immediately (even before classification), then classify and return results.
+ *
+ * Marking seen BEFORE classification means a tx that fails classification
+ * (bad UTXO data, API error, etc.) is still recorded as processed and will
+ * never re-appear on future ticks — no more silent infinite retry loops.
+ *
+ * @param {string} guildId
  * @param {string} policyId
  * @param {string} assetNameHex
- * @returns {Promise<Array>}
+ * @returns {Promise<{ trades: Array, newHashCount: number }>}
  */
-async function fetchBlockfrostTrades(policyId, assetNameHex) {
-  if (!BLOCKFROST_API_KEY) return [];
-  const rawTxs = await blockfrost.getAssetTransactions(policyId, assetNameHex, BLOCKFROST_API_KEY);
-  const trades = [];
+async function fetchBlockfrostTrades(guildId, policyId, assetNameHex) {
+  if (!BLOCKFROST_API_KEY) return { trades: [], newHashCount: 0 };
 
+  const rawTxs = await blockfrost.getAssetTransactions(policyId, assetNameHex, BLOCKFROST_API_KEY);
+
+  // Separate unseen from already-seen, marking ALL unseen immediately.
+  // This prevents any tx from being re-processed on future ticks regardless
+  // of whether classification succeeds or fails.
+  const newTxs = [];
   for (const tx of rawTxs) {
     if (!tx.txHash) continue;
+    if (hasSeen(guildId, tx.txHash)) continue;
+    markSeen(guildId, tx.txHash); // ← mark BEFORE classification
+    newTxs.push(tx);
+  }
+
+  const trades = [];
+  for (const tx of newTxs) {
     try {
       const utxos       = await blockfrost.getTransactionDetails(tx.txHash, BLOCKFROST_API_KEY);
       const action      = blockfrost.classifyTransaction(utxos, policyId);
       if (action === "other") continue;
       const adaAmount   = blockfrost.extractAdaAmount(utxos, policyId, action);
       const tokenAmount = blockfrost.extractTokenAmount(utxos, policyId);
+
+      // Skip buy alerts with 0 tokens — indicates a misclassified tx
+      // (e.g. liquidity event, script-to-script transfer, or batch edge case)
+      if (action === "buy" && tokenAmount === 0) {
+        console.warn(`[Monitor/${guildId}] Skipping buy with 0 tokens: ${tx.txHash.slice(0,16)}…`);
+        continue;
+      }
+
       trades.push({
         action,
         adaAmount,
@@ -225,16 +258,21 @@ async function fetchBlockfrostTrades(policyId, assetNameHex) {
         dex:    "Cardano Chain",
         source: "Blockfrost",
       });
-    } catch {
-      // Skip individual TX errors silently
+    } catch (err) {
+      // TX is already markSeen — won't retry. Just log for visibility.
+      console.warn(`[Monitor/${guildId}] TX ${tx.txHash.slice(0,16)}… classification failed: ${err.message}`);
     }
   }
-  return trades;
+
+  return { trades, newHashCount: newTxs.length };
 }
 
 /**
- * Run Koios + Blockfrost in parallel, merge results, deduplicate by txHash.
- * Returns new, unseen trades with source + ticker tagged.
+ * Fetch new trades for a guild. Blockfrost is primary; Koios is fallback
+ * only when Blockfrost returns zero raw transactions (downtime/rate limit).
+ *
+ * All tx hashes are marked seen BEFORE classification so a tx that fails
+ * classification is never retried on subsequent ticks.
  *
  * @param {string} guildId
  * @returns {Promise<Array>}
@@ -249,58 +287,44 @@ async function fetchNewTrades(guildId) {
 
   if (!policyId) return [];
 
-  // Resolve asset name hex once (cached after first call)
   const assetNameHex = await resolveAssetNameHex(policyId);
 
-  // ── Blockfrost primary, Koios fallback ────────────────────────
-  // Try Blockfrost first — it's more reliable and returns newest-first.
-  // Only call Koios if Blockfrost returns nothing (downtime / rate limit).
-  let blockfrostResults = [];
+  // ── Blockfrost primary ────────────────────────────────────────
+  let trades      = [];
+  let newHashCount = 0;
+  let usedSource  = "Blockfrost";
+
   try {
-    blockfrostResults = await fetchBlockfrostTrades(policyId, assetNameHex);
+    const result = await fetchBlockfrostTrades(guildId, policyId, assetNameHex);
+    trades       = result.trades;
+    newHashCount = result.newHashCount;
   } catch (err) {
-    console.warn(`[Monitor/${guildId}] Blockfrost failed: ${err.message}`);
+    console.warn(`[Monitor/${guildId}] Blockfrost error: ${err.message}`);
+    newHashCount = -1; // signal failure
   }
 
-  let merged = blockfrostResults;
-
-  if (blockfrostResults.length === 0) {
-    console.warn(`[Monitor/${guildId}] Blockfrost returned 0 trades — trying Koios fallback`);
+  // ── Koios fallback (only when Blockfrost completely unavailable) ──
+  // newHashCount === 0 means Blockfrost responded but had no new raw txs — normal.
+  // newHashCount === -1 means Blockfrost threw — try Koios.
+  if (newHashCount === -1) {
+    usedSource = "Koios";
+    console.warn(`[Monitor/${guildId}] Blockfrost unavailable — trying Koios fallback`);
     try {
       const koiosResults = await koios.getRecentTrades(policyId);
-      merged = koiosResults.map((t) => ({ ...t, source: "Koios" }));
-      if (merged.length > 0) {
-        console.log(`[Monitor/${guildId}] Koios fallback: ${merged.length} trade(s)`);
+      // Koios results go through the same seen filter
+      for (const t of koiosResults) {
+        if (!t.txHash || hasSeen(guildId, t.txHash)) continue;
+        markSeen(guildId, t.txHash);
+        trades.push({ ...t, source: "Koios" });
       }
     } catch (err) {
       console.warn(`[Monitor/${guildId}] Koios fallback also failed: ${err.message}`);
     }
   }
 
-  // Deduplicate by txHash (safety net for any duplicate entries)
-  const seenHashes = new Set();
-  merged = merged.filter((t) => {
-    if (!t.txHash || seenHashes.has(t.txHash)) return false;
-    seenHashes.add(t.txHash);
-    return true;
-  });
+  console.log(`[Monitor/${guildId}] Poll: ${trades.length} new trade(s) via ${usedSource}`);
 
-  console.log(`[Monitor/${guildId}] Poll: ${merged.length} trade(s) via ${blockfrostResults.length > 0 ? "Blockfrost" : "Koios fallback"}`);
-
-  // ── Deduplicate against already-alerted trades ────────────────
-  const newTrades = [];
-
-  for (const trade of merged) {
-    if (hasSeen(guildId, trade.txHash)) continue;
-    markSeen(guildId, trade.txHash);
-    newTrades.push({ ...trade, ticker });
-  }
-
-  if (newTrades.length > 0) {
-    console.log(`[Monitor/${guildId}] ${newTrades.length} new trade(s) to alert`);
-  }
-
-  return newTrades;
+  return trades.map((t) => ({ ...t, ticker }));
 }
 
 // ── Buy tier helpers ───────────────────────────────────────────
@@ -477,6 +501,12 @@ async function postLiquidityAlert(client, guildId, event) {
  * @param {import('discord.js').Client} client
  */
 async function tick(client) {
+  if (_ticking) {
+    console.log("[Monitor] Tick skipped — previous tick still running");
+    return;
+  }
+  _ticking = true;
+
   const activeGuilds = guildConfig.getActiveMonitoringGuilds();
   console.log(`[Monitor] Tick — ${activeGuilds.length} active guild(s): [${activeGuilds.join(", ")}]`);
 
@@ -525,6 +555,8 @@ async function tick(client) {
       console.error(`[Monitor/${guildId}] Tick error: ${err.message}`);
     }
   }
+
+  _ticking = false;
 }
 
 // ── Entry point ────────────────────────────────────────────────

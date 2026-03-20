@@ -216,6 +216,10 @@ function extractAdaAmount(utxos, policyId, action = "other") {
   const inputs  = utxos.inputs  || [];
   const outputs = utxos.outputs || [];
 
+  // Local helper — policyId is in scope here (was missing before, causing ReferenceError)
+  const hasToken = (u) =>
+    (u.amount || []).some((a) => a.unit !== "lovelace" && a.unit.startsWith(policyId));
+
   const userInputs  = inputs.filter((u) => isUserAddress(u.address));
   const userOutputs = outputs.filter((u) => isUserAddress(u.address));
 
@@ -224,22 +228,30 @@ function extractAdaAmount(utxos, policyId, action = "other") {
 
   if (action === "buy") {
     if (adaIn > 0n) {
-      // Direct swap: user wallet was an input — use gross ADA sent.
+      // Direct swap: user wallet was an input — gross ADA the user sent.
       return Number(adaIn) / 1_000_000;
     }
-    // Batched fill: measure the pool UTXO's ADA gain.
-    // The pool UTXO is the script address that also holds the token.
+
+    // Batched fill (Minswap etc.): user's ADA was already locked in the order
+    // UTXO before this execution TX, so no user wallet input exists here.
+    //
+    // Best proxy: the pool UTXO's ADA gain equals the purchase price for a
+    // single-order fill. For multi-order batches it will be the batch total,
+    // but that's the best we can do without decoding Plutus datums.
+    //
+    // The pool UTXO is the script address that ALSO holds the token.
     const poolInputs  = inputs.filter( (u) => !isUserAddress(u.address) && hasToken(u));
     const poolOutputs = outputs.filter((u) => !isUserAddress(u.address) && hasToken(u));
     const poolAdaIn   = sumLovelace(poolInputs);
     const poolAdaOut  = sumLovelace(poolOutputs);
-    const poolDelta   = poolAdaOut - poolAdaIn; // positive = pool gained ADA
+    const poolDelta   = poolAdaOut - poolAdaIn; // positive = pool gained ADA (buy)
     if (poolDelta > 0n) return Number(poolDelta) / 1_000_000;
-    // Last resort: return ADA the user received (still better than 0).
+
+    // Last resort: ADA returned to the user (at minimum this is non-zero)
     return Number(adaOut) / 1_000_000;
   }
 
-  // For sells and other: absolute net ADA change at user wallets
+  // Sells / other: absolute net ADA change at user wallets
   const diff = adaIn > adaOut ? adaIn - adaOut : adaOut - adaIn;
   return Number(diff) / 1_000_000;
 }
