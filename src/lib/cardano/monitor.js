@@ -236,28 +236,41 @@ async function fetchBlockfrostTrades(guildId, policyId, assetNameHex) {
   const trades = [];
   for (const tx of newTxs) {
     try {
-      const utxos       = await blockfrost.getTransactionDetails(tx.txHash, BLOCKFROST_API_KEY);
-      const action      = blockfrost.classifyTransaction(utxos, policyId);
+      const utxos  = await blockfrost.getTransactionDetails(tx.txHash, BLOCKFROST_API_KEY);
+      const action = blockfrost.classifyTransaction(utxos, policyId);
       if (action === "other") continue;
-      const adaAmount   = blockfrost.extractAdaAmount(utxos, policyId, action);
-      const tokenAmount = blockfrost.extractTokenAmount(utxos, policyId);
 
-      // Skip buy alerts with 0 tokens — indicates a misclassified tx
-      // (e.g. liquidity event, script-to-script transfer, or batch edge case)
-      if (action === "buy" && tokenAmount === 0) {
-        console.warn(`[Monitor/${guildId}] Skipping buy with 0 tokens: ${tx.txHash.slice(0,16)}…`);
-        continue;
+      if (action === "buy") {
+        // Extract one event per buyer in the batch.
+        // A single batch tx can fill multiple orders — each user that received
+        // tokens gets their own alert with their individual ADA cost.
+        const events = blockfrost.extractBuyEvents(utxos, policyId);
+        for (const ev of events) {
+          if (ev.tokenAmount === 0) continue; // skip ghost receipts
+          trades.push({
+            action:      "buy",
+            adaAmount:   ev.adaAmount,
+            tokenAmount: ev.tokenAmount,
+            txHash:      tx.txHash,
+            time:        tx.blockTime,
+            dex:         "Cardano Chain",
+            source:      "Blockfrost",
+          });
+        }
+      } else {
+        // sell / liquidity_add / liquidity_remove — one event per tx
+        const adaAmount   = blockfrost.extractAdaAmount(utxos, policyId, action);
+        const tokenAmount = blockfrost.extractTokenAmount(utxos, policyId);
+        trades.push({
+          action,
+          adaAmount,
+          tokenAmount,
+          txHash: tx.txHash,
+          time:   tx.blockTime,
+          dex:    "Cardano Chain",
+          source: "Blockfrost",
+        });
       }
-
-      trades.push({
-        action,
-        adaAmount,
-        tokenAmount,
-        txHash: tx.txHash,
-        time:   tx.blockTime,
-        dex:    "Cardano Chain",
-        source: "Blockfrost",
-      });
     } catch (err) {
       // TX is already markSeen — won't retry. Just log for visibility.
       console.warn(`[Monitor/${guildId}] TX ${tx.txHash.slice(0,16)}… classification failed: ${err.message}`);
