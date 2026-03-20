@@ -12,20 +12,27 @@
 
 require("dotenv").config();
 
-const http = require("http");
+const path    = require("path");
+const express = require("express");
 const { Client, GatewayIntentBits, Partials } = require("discord.js");
 const config = require("./config");
 const { startMonitoring } = require("./lib/cardano/monitor");
 
-// ── Keepalive server ───────────────────────────────────────────
-// Replit free tier kills idle processes. This tiny HTTP server
-// keeps the Repl "awake" so UptimeRobot can ping it every 5 min.
+// ── Web server (Express) ───────────────────────────────────────
+// Serves the buy/success pages and Stripe webhook.
+// Also keeps the Repl alive for UptimeRobot (ping /health).
 const PORT = process.env.PORT || 3000;
-http.createServer((req, res) => {
-  res.writeHead(200);
-  res.end("OK");
-}).listen(PORT, () => {
-  console.log(`[Keepalive] HTTP server listening on port ${PORT}`);
+const app  = express();
+
+// Serve static files from /public
+app.use(express.static(path.join(__dirname, "../public")));
+
+// Mount the Stripe checkout router (includes /buy, /success, /webhook, /health)
+const checkoutRouter = require("./payments/checkout");
+app.use("/", checkoutRouter);
+
+app.listen(PORT, () => {
+  console.log(`[Web] Express server on port ${PORT}`);
 });
 
 // ── Discord client ─────────────────────────────────────────────

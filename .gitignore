@@ -2,5 +2,6 @@ node_modules/
 .env
 src/license/keys.json
 src/config/guilds.json
+src/payments/fulfilled.json
 gifs/
 *.log

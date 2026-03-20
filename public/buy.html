@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MultiBot — Cardano DEX Alerts for Discord</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d0d0d;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ── */
+    header {
+      text-align: center;
+      padding: 3rem 1rem 2rem;
+    }
+    header h1 {
+      font-size: 2.6rem;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+    }
+    header h1 span { color: #00ff88; }
+    header p {
+      margin-top: 0.6rem;
+      color: #aaa;
+      font-size: 1.1rem;
+    }
+
+    /* ── Cards grid ── */
+    .cards {
+      display: flex;
+      gap: 1.5rem;
+      justify-content: center;
+      flex-wrap: wrap;
+      padding: 1rem 1.5rem 2rem;
+      max-width: 1100px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    .card {
+      background: #1a1a2e;
+      border: 1px solid #2a2a4a;
+      border-radius: 16px;
+      padding: 2rem 1.75rem;
+      flex: 1 1 280px;
+      max-width: 340px;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      transition: border-color 0.2s;
+    }
+    .card:hover { border-color: #00ff8866; }
+
+    .card.featured {
+      border-color: #00ff88;
+      box-shadow: 0 0 32px #00ff8822;
+    }
+
+    .badge {
+      position: absolute;
+      top: -14px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #00ff88;
+      color: #0d0d0d;
+      font-weight: 700;
+      font-size: 0.75rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      padding: 4px 14px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+
+    .card-name {
+      font-size: 1.35rem;
+      font-weight: 700;
+      margin-bottom: 0.3rem;
+    }
+
+    .card-price {
+      font-size: 2.4rem;
+      font-weight: 800;
+      color: #00ff88;
+      margin: 0.5rem 0 0.2rem;
+    }
+    .card-price sup {
+      font-size: 1.1rem;
+      vertical-align: super;
+      margin-right: 2px;
+    }
+    .card-duration {
+      font-size: 0.85rem;
+      color: #888;
+      margin-bottom: 1.2rem;
+    }
+
+    .card-desc {
+      font-size: 0.95rem;
+      color: #ccc;
+      line-height: 1.5;
+      margin-bottom: 1.5rem;
+      flex: 1;
+    }
+
+    /* ── Inline email form ── */
+    .buy-form {
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
+    }
+
+    .buy-form input[type="email"] {
+      background: #0d0d1a;
+      border: 1px solid #333;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 0.95rem;
+      padding: 0.65rem 0.9rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .buy-form input[type="email"]:focus { border-color: #00ff88; }
+    .buy-form input[type="email"]::placeholder { color: #555; }
+
+    .btn-buy {
+      background: #00ff88;
+      color: #0d0d0d;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 700;
+      padding: 0.75rem 1rem;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+    }
+    .btn-buy:hover  { background: #00e07a; }
+    .btn-buy:active { transform: scale(0.98); }
+    .btn-buy:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    .form-error {
+      color: #ff5555;
+      font-size: 0.82rem;
+      min-height: 1rem;
+    }
+
+    /* ── Footer note ── */
+    footer {
+      text-align: center;
+      color: #555;
+      font-size: 0.88rem;
+      padding: 1.5rem 1rem 2.5rem;
+      margin-top: auto;
+    }
+    footer strong { color: #888; }
+
+    @media (max-width: 700px) {
+      header h1 { font-size: 2rem; }
+      .card { max-width: 100%; }
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>Multi<span>Bot</span></h1>
+    <p>Cardano DEX alerts for your Discord server</p>
+  </header>
+
+  <main class="cards">
+
+    <!-- Buy Bot -->
+    <div class="card">
+      <div class="card-name">Buy Bot</div>
+      <div class="card-price"><sup>$</sup>25</div>
+      <div class="card-duration">90 days</div>
+      <div class="card-desc">
+        Real-time buy alerts posted to your Discord channel every time someone buys your token.
+      </div>
+      <form class="buy-form" onsubmit="startCheckout(event, 'buybot')">
+        <input type="email" placeholder="Your email address" required />
+        <div class="form-error"></div>
+        <button type="submit" class="btn-buy">Buy Now &rarr;</button>
+      </form>
+    </div>
+
+    <!-- Bundle (featured) -->
+    <div class="card featured">
+      <div class="badge">Most Popular</div>
+      <div class="card-name">Buy + Sell Bundle</div>
+      <div class="card-price"><sup>$</sup>40</div>
+      <div class="card-duration">90 days &mdash; save $10</div>
+      <div class="card-desc">
+        Both Buy Bot and Sell Bot together. Get every trade alert your community cares about.
+      </div>
+      <form class="buy-form" onsubmit="startCheckout(event, 'bundle')">
+        <input type="email" placeholder="Your email address" required />
+        <div class="form-error"></div>
+        <button type="submit" class="btn-buy">Buy Now &rarr;</button>
+      </form>
+    </div>
+
+    <!-- Sell Bot -->
+    <div class="card">
+      <div class="card-name">Sell Bot</div>
+      <div class="card-price"><sup>$</sup>25</div>
+      <div class="card-duration">90 days</div>
+      <div class="card-desc">
+        Real-time sell alerts posted to your Discord channel every time someone sells your token.
+      </div>
+      <form class="buy-form" onsubmit="startCheckout(event, 'sellbot')">
+        <input type="email" placeholder="Your email address" required />
+        <div class="form-error"></div>
+        <button type="submit" class="btn-buy">Buy Now &rarr;</button>
+      </form>
+    </div>
+
+  </main>
+
+  <footer>
+    <strong>GIF Bot is always free.</strong> All plans include 90 days of access. Secure checkout via Stripe.
+  </footer>
+
+  <script>
+    async function startCheckout(e, productKey) {
+      e.preventDefault();
+      const form  = e.target;
+      const email = form.querySelector("input[type='email']").value.trim();
+      const errEl = form.querySelector(".form-error");
+      const btn   = form.querySelector(".btn-buy");
+
+      errEl.textContent = "";
+      btn.disabled = true;
+      btn.textContent = "Redirecting…";
+
+      try {
+        const res = await fetch("/api/checkout", {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify({ productKey, email }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Server error");
+        window.location.href = data.url;
+      } catch (err) {
+        errEl.textContent = err.message || "Something went wrong. Please try again.";
+        btn.disabled = false;
+        btn.textContent = "Buy Now →";
+      }
+    }
+  </script>
+
+</body>
+</html>

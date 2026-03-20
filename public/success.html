@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Payment Successful — MultiBot</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d0d0d;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem 1rem;
+    }
+
+    .container {
+      max-width: 580px;
+      width: 100%;
+      text-align: center;
+    }
+
+    .success-icon {
+      font-size: 3.5rem;
+      margin-bottom: 1rem;
+    }
+
+    h1 {
+      font-size: 2rem;
+      font-weight: 800;
+      margin-bottom: 0.4rem;
+    }
+    h1 span { color: #00ff88; }
+
+    .product-name {
+      color: #aaa;
+      font-size: 1rem;
+      margin-bottom: 2rem;
+    }
+
+    /* ── Key box ── */
+    .key-section {
+      background: #1a1a2e;
+      border: 1px solid #00ff88;
+      border-radius: 12px;
+      padding: 1.5rem 1.5rem 1.25rem;
+      margin-bottom: 2rem;
+    }
+    .key-label {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: #888;
+      margin-bottom: 0.75rem;
+    }
+    .key-value {
+      font-family: "Courier New", Courier, monospace;
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: #00ff88;
+      letter-spacing: 0.08em;
+      word-break: break-all;
+      margin-bottom: 1rem;
+    }
+    .btn-copy {
+      background: #00ff88;
+      color: #0d0d0d;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 700;
+      padding: 0.6rem 1.5rem;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+    }
+    .btn-copy:hover  { background: #00e07a; }
+    .btn-copy:active { transform: scale(0.97); }
+    .btn-copy.copied { background: #2a2a4a; color: #00ff88; }
+
+    /* ── Steps ── */
+    .steps {
+      text-align: left;
+      margin-bottom: 2rem;
+    }
+    .steps h2 {
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin-bottom: 1rem;
+      color: #eee;
+    }
+    .step {
+      display: flex;
+      gap: 1rem;
+      align-items: flex-start;
+      margin-bottom: 0.85rem;
+    }
+    .step-num {
+      background: #00ff88;
+      color: #0d0d0d;
+      font-weight: 800;
+      font-size: 0.8rem;
+      border-radius: 50%;
+      width: 26px;
+      height: 26px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .step-text {
+      color: #ccc;
+      font-size: 0.95rem;
+      line-height: 1.5;
+      padding-top: 3px;
+    }
+    .step-text code {
+      background: #2a2a4a;
+      color: #00ff88;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-family: "Courier New", Courier, monospace;
+      font-size: 0.9em;
+    }
+
+    /* ── Expiry note ── */
+    .expiry-note {
+      background: #1a1a2e;
+      border: 1px solid #2a2a4a;
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      font-size: 0.85rem;
+      color: #888;
+      margin-bottom: 1.5rem;
+    }
+    .expiry-note strong { color: #ccc; }
+
+    .back-link {
+      color: #00ff88;
+      text-decoration: none;
+      font-size: 0.9rem;
+    }
+    .back-link:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+
+    <div class="success-icon">🎉</div>
+    <h1>Payment <span>Successful!</span></h1>
+    <div class="product-name">{{PRODUCT_NAME}} — your license key is below</div>
+
+    <div class="key-section">
+      <div class="key-label">Your License Key</div>
+      <div class="key-value" id="licenseKey">{{KEY}}</div>
+      <button class="btn-copy" id="copyBtn" onclick="copyKey()">Copy Key</button>
+    </div>
+
+    <div class="steps">
+      <h2>Activation Steps</h2>
+
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-text">Go to your Discord server where you want to activate the bot.</div>
+      </div>
+
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-text">
+          Type <code>/license key:{{KEY}}</code> to activate your license.
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-text">
+          Then run <code>/setup buybot</code> (or <code>/setup sellbot</code>) to configure your token and alert channel.
+        </div>
+      </div>
+    </div>
+
+    <div class="expiry-note">
+      <strong>Note:</strong> Your license is valid for <strong>90 days</strong> from purchase.
+      Save your key somewhere safe — you'll need it if you ever re-activate.
+    </div>
+
+    <a class="back-link" href="/buy">&larr; Back to pricing</a>
+
+  </div>
+
+  <script>
+    function copyKey() {
+      const key = document.getElementById("licenseKey").textContent.trim();
+      const btn = document.getElementById("copyBtn");
+      navigator.clipboard.writeText(key).then(() => {
+        btn.textContent = "Copied!";
+        btn.classList.add("copied");
+        setTimeout(() => {
+          btn.textContent = "Copy Key";
+          btn.classList.remove("copied");
+        }, 2500);
+      }).catch(() => {
+        // Fallback for older browsers
+        const ta = document.createElement("textarea");
+        ta.value = key;
+        ta.style.position = "fixed";
+        ta.style.opacity  = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+        btn.textContent = "Copied!";
+        btn.classList.add("copied");
+        setTimeout(() => {
+          btn.textContent = "Copy Key";
+          btn.classList.remove("copied");
+        }, 2500);
+      });
+    }
+  </script>
+
+</body>
+</html>
