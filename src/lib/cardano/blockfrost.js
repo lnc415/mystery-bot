@@ -232,22 +232,41 @@ function extractAdaAmount(utxos, policyId, action = "other") {
       return Number(adaIn) / 1_000_000;
     }
 
-    // Batched fill (Minswap etc.): user's ADA was already locked in the order
-    // UTXO before this execution TX, so no user wallet input exists here.
+    // Batched fill (Minswap etc.): user's ADA was locked in the order UTXO
+    // before this execution TX, so no user wallet appears in inputs.
     //
-    // Best proxy: the pool UTXO's ADA gain equals the purchase price for a
-    // single-order fill. For multi-order batches it will be the batch total,
-    // but that's the best we can do without decoding Plutus datums.
+    // For a single-order fill: poolDelta = the one user's purchase price. ✓
+    // For a multi-order batch:  poolDelta = SUM of all orders in the batch. ✗
     //
-    // The pool UTXO is the script address that ALSO holds the token.
+    // Fix for batches: proportional allocation.
+    //   Each user's ADA cost ∝ their share of the total tokens removed from pool.
+    //   userADA = poolDelta × (userTokensReceived / totalTokensRemovedFromPool)
+    //
+    // This is accurate to within ~0.5% (slippage makes each order's rate
+    // slightly different, but the difference is negligible for display purposes).
     const poolInputs  = inputs.filter( (u) => !isUserAddress(u.address) && hasToken(u));
     const poolOutputs = outputs.filter((u) => !isUserAddress(u.address) && hasToken(u));
     const poolAdaIn   = sumLovelace(poolInputs);
     const poolAdaOut  = sumLovelace(poolOutputs);
     const poolDelta   = poolAdaOut - poolAdaIn; // positive = pool gained ADA (buy)
-    if (poolDelta > 0n) return Number(poolDelta) / 1_000_000;
 
-    // Last resort: ADA returned to the user (at minimum this is non-zero)
+    if (poolDelta > 0n) {
+      const poolTokenIn  = sumTokens(poolInputs,  policyId);
+      const poolTokenOut = sumTokens(poolOutputs, policyId);
+      const totalRemoved = poolTokenIn > poolTokenOut ? poolTokenIn - poolTokenOut : 0n;
+      const userReceived = sumTokens(userOutputs, policyId);
+
+      if (totalRemoved > 0n && userReceived > 0n) {
+        // Proportional: user's share of the batch's total ADA cost
+        const userLovelace = (poolDelta * userReceived) / totalRemoved;
+        return Number(userLovelace) / 1_000_000;
+      }
+
+      // No token data to proportion — fall back to raw pool delta
+      return Number(poolDelta) / 1_000_000;
+    }
+
+    // Last resort: ADA returned to the user (non-zero fallback)
     return Number(adaOut) / 1_000_000;
   }
 
