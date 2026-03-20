@@ -240,7 +240,7 @@ const command = new SlashCommandBuilder()
         opt
           .setName("ticker")
           .setDescription("Token ticker symbol shown in alerts (e.g. $NIGHT, $141)")
-          .setRequired(false)
+          .setRequired(true)
       )
       .addChannelOption((opt) =>
         opt
