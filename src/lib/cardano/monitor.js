@@ -30,6 +30,15 @@ const seenTrades = new Map();
 const MAX_SEEN    = 500;
 const SEEN_TTL_MS = 10 * 60 * 1000; // forget hashes older than 10 minutes
 
+// ── Bootstrap tracker ──────────────────────────────────────────
+// Tracks which guildId:policyId combos have completed their first
+// silent drain. On the first tick for a new combo we mark all
+// existing transactions as seen WITHOUT posting — so only trades
+// that happen AFTER the bot is activated ever fire an alert.
+// When the policy ID changes the key changes, triggering a new
+// silent drain for the fresh policy.
+const bootstrapped = new Set();
+
 // ── Config ─────────────────────────────────────────────────────
 
 const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS || "30000", 10);
@@ -469,7 +478,23 @@ async function tick(client) {
 
   for (const guildId of activeGuilds) {
     try {
+      // Determine the current policy for this guild so we can detect changes.
+      const buybotCfg = guildConfig.getModuleConfig(guildId, "buybot");
+      const policyId  = buybotCfg.policyId || "";
+      const bKey      = `${guildId}:${policyId}`;
+
       const newTrades = await fetchNewTrades(guildId);
+
+      // ── Bootstrap (silent drain) ─────────────────────────────
+      // First tick for this guildId:policyId pair — all fetched
+      // transactions are already marked seen by fetchNewTrades, so
+      // just swallow them and log. Alerts start on the NEXT tick.
+      if (!bootstrapped.has(bKey)) {
+        bootstrapped.add(bKey);
+        console.log(`[Monitor/${guildId}] Bootstrap: silently drained ${newTrades.length} existing trade(s) for policy ${policyId.slice(0, 8)}… — live alerts active from next tick`);
+        continue;
+      }
+
       const hasBuybot    = guildConfig.hasModule(guildId, "buybot");
       const hasSellbot   = guildConfig.hasModule(guildId, "sellbot");
       const hasLiquidity = guildConfig.hasModule(guildId, "liquidity");

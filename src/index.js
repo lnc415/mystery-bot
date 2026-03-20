@@ -88,7 +88,7 @@ client.once("ready", () => {
   console.log(`\n🤖 ${client.user.tag} is online`);
   console.log(`   Mode: Multi-server SaaS — all config via Discord commands`);
   console.log(`   Serving ${client.guilds.cache.size} server(s)`);
-  client.user.setActivity("the $141 mystery", { type: 3 });
+  client.user.setActivity("Cardano DEX markets", { type: 3 });
 
   // Start the Cardano DEX monitoring engine
   startMonitoring(client);
