@@ -1,5 +1,6 @@
 node_modules/
 .env
 src/license/keys.json
+src/config/guilds.json
 gifs/
 *.log

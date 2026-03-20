@@ -502,6 +502,15 @@ async function tick(client) {
  */
 function startMonitoring(client) {
   console.log(`[Monitor] DEX monitor starting — polling every ${POLL_INTERVAL_MS / 1000}s`);
+  console.log(`[Monitor] Blockfrost key: ${BLOCKFROST_API_KEY ? "✅ set" : "❌ MISSING — Blockfrost disabled"}`);
+
+  const activeGuilds = guildConfig.getActiveMonitoringGuilds();
+  if (activeGuilds.length === 0) {
+    console.warn(`[Monitor] ⚠️  No active guilds found in guilds.json — no monitoring will run.`);
+    console.warn(`[Monitor] ⚠️  If you just deployed, re-run /license and /setup buybot in your Discord server.`);
+  } else {
+    console.log(`[Monitor] Active guilds at startup: ${activeGuilds.length} → [${activeGuilds.join(", ")}]`);
+  }
 
   // Initial tick immediately, then on interval
   tick(client);

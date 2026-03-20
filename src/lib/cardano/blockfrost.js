@@ -56,9 +56,12 @@ async function getAssetTransactions(policyId, assetNameHex, apiKey) {
 
   const raw = Array.isArray(res.data) ? res.data : [];
 
-  // Only keep transactions from the last 10 minutes to avoid
-  // re-processing old history after a bot restart
-  const cutoff = Math.floor(Date.now() / 1000) - 600;
+  // Only keep transactions from the last 60 minutes.
+  // 10 minutes was too short — if the bot restarts mid-window or Replit
+  // sleeps for a minute, trades would fall outside the window and be
+  // permanently missed.  The in-memory seenTrades map (10-min TTL) prevents
+  // re-alerting the same tx within the same session.
+  const cutoff = Math.floor(Date.now() / 1000) - 3600;
 
   return raw
     .map((t) => ({
