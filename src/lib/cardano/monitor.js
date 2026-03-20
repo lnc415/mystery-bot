@@ -28,7 +28,10 @@ const guildConfig = require("../guildConfig");
 const seenTrades = new Map();
 
 const MAX_SEEN    = 500;
-const SEEN_TTL_MS = 10 * 60 * 1000; // forget hashes older than 10 minutes
+// TTL must exceed the Blockfrost lookback window (3600s / 60 min).
+// If TTL < lookback, expired hashes re-enter as "new" on the next tick
+// and flood the channel with old trades. 90 minutes gives a safe buffer.
+const SEEN_TTL_MS = 90 * 60 * 1000; // 90 minutes
 
 // ── Bootstrap tracker ──────────────────────────────────────────
 // Tracks which guildId:policyId combos have completed their first
