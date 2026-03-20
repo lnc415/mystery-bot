@@ -93,7 +93,9 @@ async function resolveImageUrl(rawUrl) {
       };
     }
 
-    const directUrl = `https://drive.google.com/uc?export=view&id=${fileId}`;
+    // Use lh3.googleusercontent.com — Discord can embed this directly
+    // drive.google.com/uc?export=view often shows a confirmation page
+    const directUrl = `https://lh3.googleusercontent.com/d/${fileId}`;
     return { ok: true, url: directUrl };
   }
 

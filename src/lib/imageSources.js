@@ -62,7 +62,8 @@ function extractFolderId(folderUrl) {
  * Build a direct-view URL for a Drive file.
  */
 function driveFileUrl(fileId) {
-  return `https://drive.google.com/uc?export=view&id=${fileId}`;
+  // lh3.googleusercontent.com serves the image directly — Discord can embed it
+  return `https://lh3.googleusercontent.com/d/${fileId}`;
 }
 
 /**

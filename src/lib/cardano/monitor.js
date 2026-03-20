@@ -1,10 +1,12 @@
 /**
  * Cardano DEX Monitor — Core Polling Engine
  * ─────────────────────────────────────────────────────────────────
- * Polls three API sources per guild on a 30-second interval:
- *   1. DexHunter  (primary  — best DEX swap data, requires key)
- *   2. Koios      (secondary — free, no key required)
- *   3. Blockfrost (fallback  — raw on-chain, requires key)
+ * Polls two API sources per guild on a 30-second interval:
+ *   1. Koios      (primary  — free, no key required)
+ *   2. Blockfrost (fallback — raw on-chain, requires key)
+ *
+ * Both sources run in parallel and results are merged + deduplicated
+ * by txHash so no trade is missed even if one API is slow.
  *
  * Posts Discord embeds to configured channels for:
  *   • Buys      (🟢 green, buybot module)
@@ -16,7 +18,6 @@
  */
 
 const { EmbedBuilder } = require("discord.js");
-const dexhunter  = require("./dexhunter");
 const koios      = require("./koios");
 const blockfrost = require("./blockfrost");
 const guildConfig = require("../guildConfig");
@@ -33,8 +34,10 @@ const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS || "30000", 10);
 
 // API keys — stored in Replit Secrets, never exposed to customers
 // Koios is free and requires no key
-const DEXHUNTER_API_KEY  = process.env.DEXHUNTER_API_KEY  || "";
 const BLOCKFROST_API_KEY = process.env.BLOCKFROST_API_KEY || process.env.BLOCKFROST_PROJECT_ID || "";
+
+// Cache for resolved asset name hex per policy — avoids re-fetching every tick
+const assetNameCache = new Map();
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -117,96 +120,122 @@ function hasSeen(guildId, txHash) {
 // ── Trade fetching ─────────────────────────────────────────────
 
 /**
- * Try all three API sources in order (Taptools → DexHunter → Blockfrost).
- * Returns new, unseen trades with a `source` field attached.
+ * Resolve and cache the asset name hex for a policy ID.
+ * Tries Koios /policy_asset_list once per policy, then caches indefinitely.
+ * @param {string} policyId
+ * @returns {Promise<string>} hex asset name (may be "")
+ */
+async function resolveAssetNameHex(policyId) {
+  if (assetNameCache.has(policyId)) return assetNameCache.get(policyId);
+  try {
+    const hex = await koios.getAssetNameHex(policyId);
+    assetNameCache.set(policyId, hex);
+    console.log(`[Monitor] Resolved asset name for ${policyId.slice(0,8)}…: "${hex}"`);
+    return hex;
+  } catch {
+    assetNameCache.set(policyId, "");
+    return "";
+  }
+}
+
+/**
+ * Fetch from Blockfrost and classify each tx.
+ * @param {string} policyId
+ * @param {string} assetNameHex
+ * @returns {Promise<Array>}
+ */
+async function fetchBlockfrostTrades(policyId, assetNameHex) {
+  if (!BLOCKFROST_API_KEY) return [];
+  const rawTxs = await blockfrost.getAssetTransactions(policyId, assetNameHex, BLOCKFROST_API_KEY);
+  const trades = [];
+
+  for (const tx of rawTxs) {
+    if (!tx.txHash) continue;
+    try {
+      const utxos       = await blockfrost.getTransactionDetails(tx.txHash, BLOCKFROST_API_KEY);
+      const action      = blockfrost.classifyTransaction(utxos, policyId);
+      if (action === "other") continue;
+      const adaAmount   = blockfrost.extractAdaAmount(utxos, policyId);
+      const tokenAmount = blockfrost.extractTokenAmount(utxos, policyId);
+      trades.push({
+        action,
+        adaAmount,
+        tokenAmount,
+        txHash: tx.txHash,
+        time:   tx.blockTime,
+        dex:    "Cardano Chain",
+        source: "Blockfrost",
+      });
+    } catch {
+      // Skip individual TX errors silently
+    }
+  }
+  return trades;
+}
+
+/**
+ * Run Koios + Blockfrost in parallel, merge results, deduplicate by txHash.
+ * Returns new, unseen trades with source + ticker tagged.
  *
  * @param {string} guildId
- * @returns {Promise<Array>}  new trade objects
+ * @returns {Promise<Array>}
  */
 async function fetchNewTrades(guildId) {
   const buybotCfg    = guildConfig.getModuleConfig(guildId, "buybot");
-  const sellebotCfg  = guildConfig.getModuleConfig(guildId, "sellbot");
+  const sellbotCfg   = guildConfig.getModuleConfig(guildId, "sellbot");
   const liquidityCfg = guildConfig.getModuleConfig(guildId, "liquidity");
 
-  // policyId may live in buybot or sellbot config
-  const policyId = buybotCfg.policyId || sellebotCfg.policyId || liquidityCfg.policyId || "";
-  const ticker   = buybotCfg.ticker   || sellebotCfg.ticker   || "$TOKEN";
+  const policyId = buybotCfg.policyId || sellbotCfg.policyId || liquidityCfg.policyId || "";
+  const ticker   = buybotCfg.ticker   || sellbotCfg.ticker   || "$TOKEN";
 
   if (!policyId) return [];
 
-  let trades  = [];
-  let liquidity = [];
-  let source  = "";
+  // Resolve asset name hex once (cached after first call)
+  const assetNameHex = await resolveAssetNameHex(policyId);
 
-  // ── 1. Try DexHunter (primary — best DEX swap data) ──────────
-  if (DEXHUNTER_API_KEY) {
-    try {
-      trades = await dexhunter.getRecentSwaps(policyId, DEXHUNTER_API_KEY);
-      source = "DexHunter";
-    } catch (err) {
-      console.warn(`[Monitor/${guildId}] DexHunter failed: ${err.message}`);
-    }
+  // ── Run Koios + Blockfrost in parallel ────────────────────────
+  const [koiosTrades, blockfrostTrades] = await Promise.allSettled([
+    koios.getRecentTrades(policyId),
+    fetchBlockfrostTrades(policyId, assetNameHex),
+  ]);
+
+  const koiosResults      = koiosTrades.status      === "fulfilled" ? koiosTrades.value      : [];
+  const blockfrostResults = blockfrostTrades.status === "fulfilled" ? blockfrostTrades.value : [];
+
+  if (koiosTrades.status === "rejected") {
+    console.warn(`[Monitor/${guildId}] Koios failed: ${koiosTrades.reason?.message}`);
+  }
+  if (blockfrostTrades.status === "rejected") {
+    console.warn(`[Monitor/${guildId}] Blockfrost failed: ${blockfrostTrades.reason?.message}`);
   }
 
-  // ── 2. Try Koios if DexHunter returned nothing / failed ───────
-  // Koios is free and requires no API key
-  if (trades.length === 0) {
-    try {
-      trades = await koios.getRecentTrades(policyId);
-      source = "Koios";
-    } catch (err) {
-      console.warn(`[Monitor/${guildId}] Koios failed: ${err.message}`);
-    }
+  // Tag Koios results with source
+  const koiosTagged = koiosResults.map((t) => ({ ...t, source: "Koios" }));
+
+  // Merge all trades — deduplicate by txHash across sources
+  const allTrades = [...koiosTagged, ...blockfrostResults];
+  const seenHashes = new Set();
+  const merged = [];
+
+  for (const trade of allTrades) {
+    if (!trade.txHash || seenHashes.has(trade.txHash)) continue;
+    seenHashes.add(trade.txHash);
+    merged.push(trade);
   }
 
-  // ── 3. Fallback to Blockfrost ─────────────────────────────────
-  if (trades.length === 0 && BLOCKFROST_API_KEY) {
-    try {
-      const rawTxs = await blockfrost.getAssetTransactions(policyId, BLOCKFROST_API_KEY);
-      for (const tx of rawTxs) {
-        if (!tx.txHash) continue;
-        try {
-          const utxos  = await blockfrost.getTransactionDetails(tx.txHash, BLOCKFROST_API_KEY);
-          const action      = blockfrost.classifyTransaction(utxos, policyId);
-          if (action === "other") continue;
-          const adaAmount   = blockfrost.extractAdaAmount(utxos);
-          const tokenAmount = blockfrost.extractTokenAmount(utxos, policyId);
-          trades.push({
-            action,
-            adaAmount,
-            tokenAmount,
-            txHash: tx.txHash,
-            time:   tx.blockTime,
-            dex:    "Cardano Chain",
-          });
-        } catch {
-          // Skip individual TX errors silently
-        }
-      }
-      if (trades.length > 0) source = "Blockfrost";
-    } catch (err) {
-      console.warn(`[Monitor/${guildId}] Blockfrost failed: ${err.message}`);
-    }
-  }
+  console.log(`[Monitor/${guildId}] Poll: ${koiosTagged.length} Koios + ${blockfrostResults.length} Blockfrost = ${merged.length} unique trades`);
 
-  // ── 4. If all three failed, return empty ─────────────────────
-  if (trades.length === 0 && liquidity.length === 0) return [];
-
-  // ── 5. Deduplicate and tag with source + ticker ───────────────
+  // ── Deduplicate against already-alerted trades ────────────────
   const newTrades = [];
 
-  for (const trade of trades) {
-    const txHash = trade.txHash || "";
-    if (!txHash || hasSeen(guildId, txHash)) continue;
-    markSeen(guildId, txHash);
-    newTrades.push({ ...trade, source, ticker });
+  for (const trade of merged) {
+    if (hasSeen(guildId, trade.txHash)) continue;
+    markSeen(guildId, trade.txHash);
+    newTrades.push({ ...trade, ticker });
   }
 
-  for (const event of liquidity) {
-    const txHash = event.txHash || "";
-    if (!txHash || hasSeen(guildId, txHash)) continue;
-    markSeen(guildId, txHash);
-    newTrades.push({ ...event, action: event.type || "liquidity_add", source, ticker, isLiquidity: true });
+  if (newTrades.length > 0) {
+    console.log(`[Monitor/${guildId}] ${newTrades.length} new trade(s) to alert`);
   }
 
   return newTrades;
