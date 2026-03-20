@@ -132,13 +132,17 @@ function sumTokens(utxos, policyId) {
 }
 
 /**
- * Classify a transaction by tracking token flow to/from user wallets.
+ * Classify a transaction by tracking token and ADA flow.
  *
- * BUY:  token arrives at a user wallet address (addr1q) in outputs
- * SELL: token leaves from a user wallet address (addr1q) in inputs
+ * BUY:  token arrives at a user wallet (addr1q) in outputs.
+ *       Works for direct swaps AND batched DEX models (Minswap etc.)
+ *       because tokens always end up at the buyer's wallet.
  *
- * This works for all Cardano DEX models including Minswap batching,
- * SundaeSwap, Spectrum, and others — regardless of pool UTXO structure.
+ * SELL: In batched models (Minswap), user pre-sends tokens to an order
+ *       contract (addr1w), so no addr1q input has tokens. Instead we detect
+ *       sells by: token is present in script inputs AND a user wallet
+ *       receives significant ADA in outputs (what they got for selling).
+ *       Also catches direct sells where token leaves from addr1q inputs.
  *
  * @param {object} utxos     - { inputs, outputs }
  * @param {string} policyId
@@ -148,41 +152,49 @@ function classifyTransaction(utxos, policyId) {
   const inputs  = utxos.inputs  || [];
   const outputs = utxos.outputs || [];
 
-  // Outputs at user wallets that contain our token → BUY receipts
-  const buyReceipts = outputs.filter(
-    (u) =>
-      isUserAddress(u.address) &&
-      (u.amount || []).some(
-        (a) => a.unit !== "lovelace" && a.unit.startsWith(policyId)
-      )
+  const hasToken = (u) =>
+    (u.amount || []).some((a) => a.unit !== "lovelace" && a.unit.startsWith(policyId));
+
+  const getLovelace = (u) => {
+    const lv = (u.amount || []).find((a) => a.unit === "lovelace");
+    return BigInt(lv?.quantity || 0);
+  };
+
+  // ── BUY: token lands at a user wallet ────────────────────────
+  // Works for both direct swaps and batched execution (Minswap, SundaeSwap)
+  const buyReceipts = outputs.filter((u) => isUserAddress(u.address) && hasToken(u));
+  if (buyReceipts.length > 0) return "buy";
+
+  // ── Check if token is involved at all ────────────────────────
+  const tokenInvolved = [...inputs, ...outputs].some(hasToken);
+  if (!tokenInvolved) return "other";
+
+  // ── SELL: token involved but NOT landing at user wallet ───────
+  // Batched sell model: user sent tokens to order contract earlier.
+  // The execution TX shows tokens in script inputs + ADA going to user.
+  const tokenInScriptInputs = inputs.some((u) => !isUserAddress(u.address) && hasToken(u));
+
+  // User wallet receives more than 2 ADA (not just dust/change)
+  const userReceivesAda = outputs.some(
+    (u) => isUserAddress(u.address) && getLovelace(u) > 2_000_000n
   );
 
-  // Inputs from user wallets that contain our token → SELL submissions
-  const sellSubmissions = inputs.filter(
-    (u) =>
-      isUserAddress(u.address) &&
-      (u.amount || []).some(
-        (a) => a.unit !== "lovelace" && a.unit.startsWith(policyId)
-      )
-  );
+  if (tokenInScriptInputs && userReceivesAda) return "sell";
 
-  if (buyReceipts.length > 0)     return "buy";
-  if (sellSubmissions.length > 0) return "sell";
+  // Direct sell: token leaves from user wallet input
+  const directSell = inputs.some((u) => isUserAddress(u.address) && hasToken(u));
+  if (directSell) return "sell";
 
-  // Both contract inputs and outputs contain the token → liquidity event
-  const contractTokenIn  = inputs.filter(
-    (u) => !isUserAddress(u.address) &&
-      (u.amount || []).some((a) => a.unit !== "lovelace" && a.unit.startsWith(policyId))
-  );
-  const contractTokenOut = outputs.filter(
-    (u) => !isUserAddress(u.address) &&
-      (u.amount || []).some((a) => a.unit !== "lovelace" && a.unit.startsWith(policyId))
-  );
+  // ── Liquidity event: token moves between script addresses ─────
+  const contractTokenIn  = inputs.filter( (u) => !isUserAddress(u.address) && hasToken(u));
+  const contractTokenOut = outputs.filter((u) => !isUserAddress(u.address) && hasToken(u));
 
   if (contractTokenIn.length > 0 && contractTokenOut.length > 0) {
     const tokenIn  = sumTokens(contractTokenIn,  policyId);
     const tokenOut = sumTokens(contractTokenOut, policyId);
-    return tokenOut > tokenIn ? "liquidity_add" : "liquidity_remove";
+    if (tokenIn !== tokenOut) {
+      return tokenOut > tokenIn ? "liquidity_add" : "liquidity_remove";
+    }
   }
 
   return "other";
