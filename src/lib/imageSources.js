@@ -19,10 +19,12 @@ const { getModuleConfig } = require("./guildConfig");
 
 // ── Built-in fallback URLs ─────────────────────────────────────
 
+// Fallback GIFs — stable Tenor/media URLs that Discord can embed directly.
+// Replace these with on-brand images once a Drive folder is configured.
 const DEFAULT_URLS = [
-  "https://media.giphy.com/media/3o7TKSjRrfIPjeiVyM/giphy.gif",
-  "https://media.giphy.com/media/26uf9QPzzpCMOiRPy/giphy.gif",
-  "https://media.giphy.com/media/l0HlHFRbmaZtBRhXG/giphy.gif",
+  "https://media.tenor.com/dQFMrXkDhB8AAAAC/detective-magnifying-glass.gif",
+  "https://media.tenor.com/AoHsKjRklMEAAAAC/detective-clue.gif",
+  "https://media.tenor.com/5FBPpDCNB6QAAAAC/mystery-sherlock.gif",
 ];
 
 // ── Local folder lookup ────────────────────────────────────────

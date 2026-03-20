@@ -93,9 +93,10 @@ async function resolveImageUrl(rawUrl) {
       };
     }
 
-    // Use lh3.googleusercontent.com — Discord can embed this directly
-    // drive.google.com/uc?export=view often shows a confirmation page
-    const directUrl = `https://lh3.googleusercontent.com/d/${fileId}`;
+    // thumbnail?sz=w1000 is the most reliable direct-image URL for Google
+    // Drive files. It works for any publicly-shared file without requiring
+    // a Google login and Discord can embed it without a confirmation page.
+    const directUrl = `https://drive.google.com/thumbnail?id=${fileId}&sz=w1000`;
     return { ok: true, url: directUrl };
   }
 
