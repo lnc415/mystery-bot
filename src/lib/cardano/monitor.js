@@ -144,21 +144,39 @@ function hasSeen(guildId, txHash) {
 
 /**
  * Resolve and cache the asset name hex for a policy ID.
- * Tries Koios /policy_asset_list once per policy, then caches indefinitely.
+ * Tries Koios first, falls back to Blockfrost /assets/policy/{id}.
+ * Only caches on success — failures retry next poll.
  * @param {string} policyId
- * @returns {Promise<string>} hex asset name (may be "")
+ * @returns {Promise<string>} hex asset name (may be "" for unnamed tokens)
  */
 async function resolveAssetNameHex(policyId) {
   if (assetNameCache.has(policyId)) return assetNameCache.get(policyId);
+
+  // 1. Try Koios (free, no key)
   try {
     const hex = await koios.getAssetNameHex(policyId);
     assetNameCache.set(policyId, hex);
-    console.log(`[Monitor] Resolved asset name for ${policyId.slice(0,8)}…: "${hex}"`);
+    console.log(`[Monitor] Asset name resolved via Koios for ${policyId.slice(0,8)}…: "${hex}"`);
     return hex;
   } catch {
-    assetNameCache.set(policyId, "");
-    return "";
+    console.warn(`[Monitor] Koios asset name lookup failed — trying Blockfrost`);
   }
+
+  // 2. Fallback to Blockfrost /assets/policy/{policyId}
+  if (BLOCKFROST_API_KEY) {
+    try {
+      const hex = await blockfrost.getAssetNameHex(policyId, BLOCKFROST_API_KEY);
+      assetNameCache.set(policyId, hex);
+      console.log(`[Monitor] Asset name resolved via Blockfrost for ${policyId.slice(0,8)}…: "${hex}"`);
+      return hex;
+    } catch {
+      console.warn(`[Monitor] Blockfrost asset name lookup also failed`);
+    }
+  }
+
+  // Do NOT cache failures — retry next poll
+  console.warn(`[Monitor] Could not resolve asset name for ${policyId.slice(0,8)}… — will retry next poll`);
+  return "";
 }
 
 /**

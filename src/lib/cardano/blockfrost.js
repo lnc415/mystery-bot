@@ -238,6 +238,30 @@ function extractTokenAmount(utxos, policyId) {
   return Number(diff);
 }
 
+/**
+ * Get asset name hex for the first asset under a policy ID.
+ * Used as fallback when Koios is unavailable.
+ * Extracts the asset name by stripping the policy ID from the full asset unit.
+ *
+ * @param {string} policyId
+ * @param {string} apiKey
+ * @returns {Promise<string>} hex asset name (e.g. "4e49474854") or ""
+ */
+async function getAssetNameHex(policyId, apiKey) {
+  const client = makeClient(apiKey);
+  const res    = await client.get(`/assets/policy/${policyId}`, {
+    params: { count: 1, order: "desc" },
+  });
+
+  const assets = Array.isArray(res.data) ? res.data : [];
+  if (assets.length === 0) return "";
+
+  // Full asset unit = policyId + assetNameHex
+  // Strip the policy ID prefix to get just the asset name hex
+  const fullUnit = assets[0].asset || "";
+  return fullUnit.slice(policyId.length);
+}
+
 module.exports = {
   getAssetTransactions,
   getTransactionDetails,
@@ -245,4 +269,5 @@ module.exports = {
   extractAdaAmount,
   extractTokenAmount,
   buildAssetUnit,
+  getAssetNameHex,
 };
