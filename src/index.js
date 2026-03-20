@@ -56,6 +56,7 @@ const commandHandlers = {
   setup:     require("./commands/setup"),
   status:    require("./commands/status"),
   help:      require("./commands/help"),
+  debug:     require("./commands/debug"),
   gif:       require("./modules/gifbot/index"),
 };
 

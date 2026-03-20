@@ -17,6 +17,7 @@ const commandFiles = [
   { name: "setup",     path: "./commands/setup"          },
   { name: "status",    path: "./commands/status"         },
   { name: "help",      path: "./commands/help"           },
+  { name: "debug",     path: "./commands/debug"          },
   { name: "gif",       path: "./modules/gifbot/index"    },
 ];
 
