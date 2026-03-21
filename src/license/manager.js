@@ -232,14 +232,53 @@ function keyInfo(licenseKey, guildId = null) {
 }
 
 /**
+ * Validate a key against the Vercel checkout API.
+ * Used as fallback when key isn't found in local keys.json.
+ */
+async function validateWithVercel(licenseKey) {
+  const vercelUrl = process.env.VERCEL_WEB_URL;
+  const secret    = process.env.INTERNAL_API_SECRET;
+  if (!vercelUrl || !secret) return null;
+
+  try {
+    const res = await axios.get(`${vercelUrl}/api/validate`, {
+      params:  { key: licenseKey, token: secret },
+      timeout: 8000,
+    });
+    if (res.data && res.data.valid) return res.data;
+    return null;
+  } catch (err) {
+    console.warn("[License] Vercel validation error:", err.message);
+    return null;
+  }
+}
+
+/**
  * Activate a license key for a specific guild.
  * Binds the key to that guild and saves to keys.json.
  * Returns { success, reason, modules, expires }
  */
-function activateLicense(licenseKey, guildId) {
+async function activateLicense(licenseKey, guildId) {
   loadKeys(); // Always read fresh from disk so newly-generated keys are found
   const key = licenseKey.trim().toUpperCase();
-  const entry = keyStore[key];
+  let entry = keyStore[key];
+
+  // Not in local store — check Vercel API (keys generated via Stripe checkout)
+  if (!entry) {
+    console.log(`[License] Key not in local store, checking Vercel API...`);
+    const remote = await validateWithVercel(key);
+    if (remote) {
+      entry = {
+        modules: remote.modules || [],
+        expires: remote.expiresAt || null,
+        label:   remote.productName || "Mystery Bot License",
+        tier:    remote.productKey  || "unknown",
+      };
+      keyStore[key] = entry;
+      saveKeys();
+      console.log(`[License] Cached remote key ${key} locally`);
+    }
+  }
 
   if (!entry) {
     return { success: false, reason: "Key not found. Double-check the key or purchase a license at the dashboard." };
@@ -307,6 +346,7 @@ function getModulesForGuild(guildId) {
 }
 
 module.exports = {
+  validateWithVercel,
   getEntitlements,
   isUnlocked,
   isUnlockedAsync,

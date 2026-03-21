@@ -56,7 +56,7 @@ async function execute(interaction) {
   }
 
   // Validate and bind key to this guild (updates license/keys.json)
-  const result = activateLicense(key, guildId);
+  const result = await activateLicense(key, guildId);
 
   if (!result.success) {
     return interaction.reply({
