@@ -89,7 +89,7 @@ async function execute(interaction) {
     .setColor(0x00c851)
     .setTitle("✅ License Activated!")
     .setDescription(
-      `Mystery Bot is now licensed for **${interaction.guild.name}**.\n` +
+      `Mystery Bot is now licensed for **${interaction.guild?.name || 'your server'}**.\n` +
       `All server members can immediately use the unlocked features.`
     )
     .addFields(
